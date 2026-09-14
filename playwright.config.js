@@ -1,24 +1,32 @@
 const { defineConfig } = require('@playwright/test');
 
+// Resolución de navegador: local usa Google Chrome; Docker usa chromium bundled.
+// - PW_CHANNEL  undefined -> chrome (Google Chrome instalado)
+// - PW_CHANNEL  "chromium" -> chromium portable (Docker)
+// - PW_HEADLESS "true"     -> modo headless (Docker)
+const rawChannel = process.env.PW_CHANNEL;
+const channel = rawChannel === undefined ? 'chrome' : rawChannel === 'chromium' ? undefined : rawChannel;
+
 module.exports = defineConfig({
-  testDir: '.', // Busca los archivos de prueba en la carpeta raíz
+  testDir: './tests',       // Pruebas en la carpeta tests/
   timeout: 30000,
   expect: {
     timeout: 5000
   },
   reporter: 'html',
   use: {
-    headless: false,
+    headless: process.env.PW_HEADLESS === 'true',
     viewport: { width: 1280, height: 720 },
     ignoreHTTPSErrors: true,
+    channel,
+    screenshot: 'only-on-failure',     // Captura de pantalla automática al fallar
+    trace: 'retain-on-failure',        // Traza de red/consola en caso de fallo
   },
+  outputDir: './test-results',         // Screenshots y trazas de fallos
   projects: [
     {
       name: 'chromium',
-      use: { 
-        // Fuerza a Playwright a usar el Google Chrome 
-        channel: 'chrome', 
-      },
+      use: {},
     },
   ],
 });

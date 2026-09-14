@@ -1,4 +1,10 @@
 {
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:stress": "node scripts/runner.js",
+    "test:stress:ui": "playwright test --ui",
+    "test:stress:docker": "docker compose up --build --abort-on-container-exit --remove-orphans"
+  },
   "dependencies": {
     "@playwright/test": "^1.63.0"
   }

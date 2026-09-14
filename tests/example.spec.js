@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
-// Carga las URLs dinámicas provistas por el equipo de I+D+i
-const urlsPath = path.resolve(__dirname, 'urls.json');
+// Carga las URLs dinámicas provistas por el equipo de I+D+i (data/urls.json)
+const urlsPath = path.resolve(__dirname, '..', 'data', 'urls.json');
 const targetUrls = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'));
 
 test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright Engine', () => {

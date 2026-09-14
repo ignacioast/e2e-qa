@@ -1,0 +1,11 @@
+services:
+  e2e:
+    build: .
+    container_name: e2e-qa-stress
+    environment:
+      - PW_CHANNEL=chromium
+      - PW_HEADLESS=true
+    volumes:
+      - ./playwright-report:/app/playwright-report
+      - ./test-results:/app/test-results
+      - ./jmeter/results:/app/jmeter/results

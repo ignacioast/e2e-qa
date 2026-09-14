@@ -1,7 +1,6 @@
 node_modules/
-playwright-report/
 test-results/
+playwright-report/
 jmeter/results/
 jmeter/jmeter.log
-playwright/.cache/
-*.log
+.git/
