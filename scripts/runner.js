@@ -137,6 +137,132 @@ function runPlaywright() {
   });
 }
 
+/**
+ * Analiza el JTL generado por JMeter y responde:
+ *  - Cuántas peticiones se hicieron y cuántas fallaron (%).
+ *  - En qué usuario(n) concreto se rompió la página (threadName = usuario JMeter).
+ *  - Latencia promedio / máxima.
+ * Genera reports/jmeter_resumen.json (consumido por la web local).
+ */
+async function analyzeJtl() {
+  const outDir = path.join(PROJECT_ROOT, 'reports');
+  const outFile = path.join(outDir, 'jmeter_resumen.json');
+
+  if (!fs.existsSync(RESULT_FILE)) {
+    console.error('[Runner] No se encontró el JTL para analizar.');
+    return;
+  }
+
+  const lines = fs.readFileSync(RESULT_FILE, 'utf-8').split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) {
+    console.error('[Runner] El JTL está vacío.');
+    return;
+  }
+
+  const headers = lines[0].split(',');
+  const idx = {
+    thread: headers.indexOf('threadName'),
+    success: headers.indexOf('success'),
+    elapsed: headers.indexOf('elapsed'),
+    label: headers.indexOf('label'),
+    code: headers.indexOf('responseCode'),
+  };
+  if (idx.thread === -1 || idx.success === -1) {
+    console.error('[Runner] Formato de JTL inesperado. No se pudo analizar.');
+    return;
+  }
+
+  const parseCsvLine = (line) => {
+    const out = [];
+    let cur = '';
+    let inQ = false;
+    for (const ch of line) {
+      if (ch === '"') inQ = !inQ;
+      else if (ch === ',' && !inQ) { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out;
+  };
+
+  let total = 0;
+  let errors = 0;
+  let sumElapsed = 0;
+  let maxElapsed = 0;
+  let firstError = null;
+  const byThread = {};     // usuario -> {ok, err, latencies[]}
+  const errorCodes = {};
+
+  for (let i = 1; i < lines.length; i++) {
+    const c = parseCsvLine(lines[i]);
+    const thread = c[idx.thread] || '';
+    // Las filas sin threadName son líneas auxiliares de la aserción de JMeter ("****** received", etc.):
+    // no son peticiones reales, se omiten para no inflar las métricas.
+    if (!thread || !c[idx.success]) continue;
+
+    const ok = c[idx.success].trim() === 'true';
+    const elapsed = parseInt(c[idx.elapsed], 10) || 0;
+
+    total++;
+    sumElapsed += elapsed;
+    maxElapsed = Math.max(maxElapsed, elapsed);
+
+    if (!byThread[thread]) byThread[thread] = { ok: 0, err: 0, latencies: [] };
+    byThread[thread].latencies.push(elapsed);
+
+    if (ok) byThread[thread].ok++;
+    else {
+      byThread[thread].err++;
+      errors++;
+      if (!firstError) firstError = { thread, code: c[idx.code], label: c[idx.label] };
+      const code = c[idx.code] || '?';
+      errorCodes[code] = (errorCodes[code] || 0) + 1;
+    }
+  }
+
+  // Usuarios con fallos
+  const userErrors = Object.entries(byThread)
+    .filter(([, s]) => s.err > 0)
+    .map(([thread, s]) => ({ usuario: thread, errores: s.err, peticiones: s.ok + s.err, ok: s.ok }))
+    .sort((a, b) => b.errores - a.errores);
+
+  const avgElapsed = total ? (sumElapsed / total) : 0;
+
+  const resumen = {
+    fecha: new Date().toISOString(),
+    totalPeticiones: total,
+    errores: errors,
+    porcentajeError: total ? +((errors / total) * 100).toFixed(2) : 0,
+    latenciaPromedioMs: Math.round(avgElapsed),
+    latenciaMaximaMs: maxElapsed,
+    primerError: firstError,
+    usuariosConErrores: userErrors,
+    totalUsuarios: Object.keys(byThread).length,
+    codigosError: errorCodes,
+  };
+
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(outFile, JSON.stringify(resumen, null, 2));
+
+  console.log('\n===== REPORTE JMETER (STRESS) =====');
+  console.log(`[JMeter] Peticiones totales : ${total}`);
+  console.log(`[JMeter] Usuarios simulados : ${Object.keys(byThread).length}`);
+  console.log(`[JMeter] Errores            : ${errors} (${resumen.porcentajeError}%)`);
+  console.log(`[JMeter] Latencia promedio  : ${resumen.latenciaPromedioMs} ms | máxima ${maxElapsed} ms`);
+
+  if (userErrors.length) {
+    console.log('\n[JMeter] ⚠️  La página se rompió en estos usuarios:');
+    for (const u of userErrors) {
+      console.log(`  · ${u.usuario} → ${u.errores} errores de ${u.peticiones} peticiones`);
+    }
+    if (firstError) {
+      console.log(`\n[JMeter] Primer fallo registrado: usuario ${firstError.thread}, código ${firstError.code}, label "${firstError.label}"`);
+    }
+  } else {
+    console.log('\n[JMeter] ✅ Sin errores: ninguna página se rompió bajo carga.');
+  }
+}
+
 /** Detiene JMeter de forma limpia y da margen para que escriba el .jtl */
 async function stopJmeter(child) {
   if (!child) return;
@@ -173,8 +299,10 @@ async function main() {
     await stopJmeter(jmeter);
 
     console.log('[Runner] Estrés finalizado.');
-    console.log(`[Runner] JTL   : ${RESULT_FILE}`);
     console.log('[Runner] Reporte HTML: playwright-report/');
+
+    await analyzeJtl();
+
     process.exit(exitCode);
   } catch (err) {
     console.error(err.message);

@@ -4,11 +4,12 @@ Suite de pruebas end-to-end construida con [Playwright Test](https://playwright.
 
 ## Funcionalidades
 
-- **Exploración (crawler)**: recorre automáticamente los enlaces internos de cada dominio (hasta 5 páginas por dominio).
-- **Almacenamiento en caché**: intercepta las respuestas de red para validar las directivas `Cache-Control`.
-- **Memoria RAM**: mide el uso real del heap de JavaScript (`performance.memory.usedJSHeapSize`) y lo mantiene bajo 150 MB.
-- **Carga masiva**: genera estrés concurrente con JMeter (50 usuarios / 10 s ramp-up / 60 s duración).
-- **Capturas y trazas**: screenshot + trace automáticos en caso de fallo (`test-results/`).
+- **Exploración (crawler)**: audita **todos** los enlaces internos detectados de cada dominio, **una sola pasada** (sin recursión → sin dar vueltas en círculos).
+- **Auditoría profunda por página**: tiempo de carga (ms), memoria heap JS, `Cache-Control`, `<title>`, `<h1>`, imágenes sin `alt`, errores de consola y respuestas 4xx/5xx.
+- **Pantallazos**: uno por página (`reports/screenshots/`) y una carpeta `errors/` con los pantallazos de las páginas que fallan.
+- **Carga masiva**: estrés concurrente con JMeter (50 usuarios / 10 s ramp-up / 60 s duración).
+- **Análisis de fallos bajo carga**: el runner lee el `.jtl` e informa **en qué usuario se rompió** la página, % de error y latencias.
+- **Web local**: `npm run dashboard` abre `http://localhost:3000` con todo el resultado (tablas + pantallazos + reporte JMeter).
 
 ## Requisitos del equipo
 
@@ -35,30 +36,40 @@ npm install
 
 | Comando | Qué hace |
 |---|---|
+| `npm run test:stress` | JMeter + Playwright, genera reportes + pantallazos |
 | `npm run test:e2e` | Solo Playwright (sin carga) |
-| `npm run test:stress` | JMeter + Playwright orquestados por `scripts/runner.js` |
-| `npm run test:stress:ui` | Modo UI de Playwright |
+| `npm run test:stress:ui` | Modo UI de Playwright (ver análisis en vivo) |
+| `npm run dashboard` | Abre la web local en `http://localhost:3000` |
 | `npm run test:stress:docker` | Todo dentro de Docker (sin instalar JMeter/Chrome) |
+
+### Flujo recomendado
+
+```bash
+npm run test:stress    # 1. Auditoría + estrés
+npm run dashboard      # 2. Ver todo en el navegador
+```
 
 ### Docker
 
 ```bash
 npm run test:stress:docker
 ```
-Levanta JMeter + Playwright en un contenedor (headless). Los resultados quedan en `playwright-report/`, `test-results/` y `jmeter/results/`.
+Levanta JMeter + Playwright en un contenedor (headless).
 
 ## Estructura del proyecto
 
 ```
 ├── tests/
-│   └── example.spec.js        # Script de auditoría E2E
+│   └── example.spec.js        # Auditoría E2E + pantallazos
 ├── data/
 │   └── urls.json              # URLs base a auditar
 ├── scripts/
-│   └── runner.js              # Orquestador JMeter + Playwright
+│   ├── runner.js              # Orquestador JMeter + Playwright + análisis JTL
+│   └── dashboard.js           # Web local
 ├── jmeter/
 │   ├── carga_ast.jmx          # Plan de carga (50 usuarios, 60 s)
 │   └── results/               # Resultados .jtl (generados)
+├── reports/                   # auditoria.json, jmeter_resumen.json, screenshots/
 ├── playwright.config.js       # Configuración global
 ├── Dockerfile / docker-compose.yml
 └── package.json
@@ -66,6 +77,10 @@ Levanta JMeter + Playwright en un contenedor (headless). Los resultados quedan e
 
 ## Reportes
 
-- **HTML**: `playwright-report/` (ver con `npx playwright show-report`)
-- **JMeter JTL**: `jmeter/results/carga_ast.jtl` (abrir en el Listener de JMeter)
-- **Capturas y trazas de fallos**: `test-results/`
+- **Web local**: `npm run dashboard` → `http://localhost:3000`
+- **JSON de auditoría**: `reports/auditoria.json`
+- **JSON de estrés**: `reports/jmeter_resumen.json`
+- **Pantallazos por página**: `reports/screenshots/` · fallos en `reports/screenshots/errors/`
+- **HTML Playwright**: `playwright-report/` (ver con `npx playwright show-report`)
+- **JMeter JTL**: `jmeter/results/carga_ast.jtl`
+- **Trazas de fallos**: `test-results/`

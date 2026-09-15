@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>E2E QA — Panel de Auditoría</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🧪</span>
+      <div>
+        <h1>E2E QA</h1>
+        <p>Auditoría autónoma · Playwright + JMeter</p>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span class="stamp" id="stamp">—</span>
+      <button class="btn" id="refresh" title="Recargar datos">↻ Recargar</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- KPIs -->
+    <section id="kpis" class="kpis"></section>
+
+    <!-- Auditoría -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Páginas auditadas <span class="muted">(Playwright)</span></h2>
+        <div class="controls">
+          <input id="search" class="input" type="search" placeholder="Filtrar por URL…">
+          <select id="filterStatus" class="input" aria-label="Filtrar por estado">
+            <option value="all">Todos los estados</option>
+            <option value="OK">Solo OK</option>
+            <option value="FALLÓ">Solo fallidas</option>
+          </select>
+
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="auditTable">
+          <thead>
+            <tr>
+              <th>Estado</th>
+              <th>URL</th>
+              <th class="num">Tiempo</th>
+              <th class="num">Memoria</th>
+              <th>Caché</th>
+              <th>Issues</th>
+              <th>Pantallazo</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Estrés JMeter -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Reporte de estrés <span class="muted">(JMeter)</span></h2>
+      </div>
+      <div id="jmeter" class="jmeter"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Datos: <code>reports/auditoria.json</code> · <code>reports/jmeter_resumen.json</code>
+  </footer>
+
+  <!-- Lightbox -->
+  <div id="lightbox" class="lightbox" hidden>
+    <img src="" alt="Pantallazo">
+    <button id="lbClose" class="lb-close">✕</button>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+
+</html>
