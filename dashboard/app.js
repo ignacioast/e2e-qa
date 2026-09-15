@@ -24,7 +24,7 @@ async function load() {
 
   const stamp = $('#stamp');
   const ts = audit?.ejecutado || jmeter?.fecha;
-  stamp.textContent = ts ? '⏱ ' + new Date(ts).toLocaleString('es-CL') : 'sin datos';
+  stamp.textContent = ts ? 'Última ejecución: ' + new Date(ts).toLocaleString('es-CL') : 'Sin datos de ejecución';
 
   renderKPIs(audit, jmeter);
   const search = $('#search');
@@ -145,7 +145,7 @@ function renderJmeter(jmeter) {
       }).join('') +
       '</div>';
   } else {
-    html += '<p class="ok-msg">✅ Ninguna página se rompió bajo carga.</p>';
+    html += '<p class="ok-msg">Sin errores: ninguna página se rompió bajo carga.</p>';
   }
 
   box.innerHTML = html;

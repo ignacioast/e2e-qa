@@ -36,7 +36,7 @@ npm install
 
 | Comando | Qué hace |
 |---|---|
-| `npm run test:stress` | JMeter + Playwright, genera reportes + pantallazos |
+| `npm run test:stress` | JMeter + Playwright, genera reportes + pantallazos y abre la web local al terminar |
 | `npm run test:e2e` | Solo Playwright (sin carga) |
 | `npm run test:stress:ui` | Modo UI de Playwright (ver análisis en vivo) |
 | `npm run dashboard` | Abre la web local en `http://localhost:3000` |
@@ -45,11 +45,22 @@ npm install
 ### Flujo recomendado
 
 ```bash
-npm run test:stress    # 1. Auditoría + estrés
-npm run dashboard      # 2. Ver todo en el navegador
+npm run test:stress    # 1. Auditoría + estrés (abre el dashboard al terminar)
+npm run dashboard      # 2. (opcional) si lo cerraste, vuelve a abrir la web
 ```
 
-### Docker
+## Ejecución automática (GitHub Actions)
+
+El repo incluye un workflow [`stress.yml`](.github/workflows/stress.yml) que corre la suite completa en un runner Linux:
+
+- **Automático**: todos los días a las 09:00 UTC (≈ 05:00–06:00 Chile).
+- **Manual**: pestaña **Actions** → `E2E Stress Nightly` → **Run workflow**.
+
+Al terminar sube como artefactos: `reports/`, `playwright-report/` y `test-results/` (descargables desde la misma corrida, 30 días).
+
+> ⚠️ **Nota sobre headless en CI**: el sitio real detecta bots y responde con una versión reducida a navegadores headless, por lo que en CI la auditoría encontrará **menos enlaces** que localmente. La auditoría completa (216 páginas detectadas) se ve ejecutando local en modo visible.
+
+## Docker
 
 ```bash
 npm run test:stress:docker
@@ -65,11 +76,13 @@ Levanta JMeter + Playwright en un contenedor (headless).
 │   └── urls.json              # URLs base a auditar
 ├── scripts/
 │   ├── runner.js              # Orquestador JMeter + Playwright + análisis JTL
-│   └── dashboard.js           # Web local
+│   └── dashboard.js           # Servidor de la web local
+├── dashboard/                 # Frontend de la web local (html/css/js)
 ├── jmeter/
 │   ├── carga_ast.jmx          # Plan de carga (50 usuarios, 60 s)
 │   └── results/               # Resultados .jtl (generados)
 ├── reports/                   # auditoria.json, jmeter_resumen.json, screenshots/
+├── .github/workflows/         # stress.yml (planificación GitHub Actions)
 ├── playwright.config.js       # Configuración global
 ├── Dockerfile / docker-compose.yml
 └── package.json

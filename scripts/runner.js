@@ -99,6 +99,31 @@ async function startJmeter() {
 
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
 
+  // Limpia resultados de corridas anteriores: JMeter hace append al .jtl, así que
+  // sin borrar se acumularían peticiones viejas y el reporte saldría inflado.
+  // El archivo puede estar bloqueado por un JMeter anterior (EBUSY): reintenta.
+  for (const f of [RESULT_FILE, JMETER_LOG_FILE]) {
+    if (!fs.existsSync(f)) continue;
+    let cleared = false;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        fs.unlinkSync(f);
+        cleared = true;
+        break;
+      } catch (err) {
+        if (attempt === 5) {
+          throw new Error(
+            `[Runner] No se pudo borrar ${f}: ${err.message}. ` +
+            'Una instancia de JMeter aún tiene el archivo abierto. ' +
+            'Ciérrala (taskkill /F /IM java.exe) y vuelve a correr el test.'
+          );
+        }
+        console.log(`[Runner] Archivo en uso (${f}), reintentando en 1 s... (intento ${attempt}/5)`);
+        await sleep(1000);
+      }
+    }
+  }
+
   console.log('[Runner] Iniciando JMeter en modo Non-GUI...');
   console.log(`[Runner] Plan de carga: ${JMETER_PLAN}`);
   console.log(`[Runner] Resultados  : ${RESULT_FILE}`);
@@ -109,8 +134,8 @@ async function startJmeter() {
 
   // Si JMeter termina antes de que pidamos el cierre, es un fallo de arranque.
   child.on('exit', (code) => {
-    if (!child.stopRequested) {
-      console.error(`[Runner] ERROR: JMeter terminó prematuramente (código ${code}). Revisa el plan o la instalación.`);
+    if (!child.stopRequested && code !== 0) {
+      console.error(`[Runner] ERROR: JMeter terminó con error (código ${code}). Revisa el plan o la instalación.`);
       process.exitCode = 1;
     }
   });
@@ -263,7 +288,59 @@ async function analyzeJtl() {
   }
 }
 
+/**
+ * Abre la web local del dashboard al terminar el estrés (solo en uso local).
+ * En CI (GitHub Actions) se omite para no colgar/abrir navegador sin sentido.
+ */
+async function openDashboard() {
+  if (process.env.CI) {
+    console.log('[Runner] Entorno CI detectado, saltando apertura del dashboard.');
+    return;
+  }
+
+  const port = process.env.PORT || 3000;
+  const url = `http://localhost:${port}`;
+  const dashboardScript = path.join(__dirname, 'dashboard.js');
+
+  const dashCmd = `"${process.execPath}" "${dashboardScript}"`;
+  const dash = spawn(dashCmd, {
+    cwd: PROJECT_ROOT,
+    stdio: 'ignore',
+    detached: true,
+    shell: true,
+  });
+  dash.unref();
+
+  await sleep(1500);
+  console.log(`[Runner] Abriendo dashboard local: ${url}`);
+
+  const isWin = process.platform === 'win32';
+  const openCmd = isWin
+    ? `cmd /c start "" "${url}"`
+    : `xdg-open "${url}"`;
+
+  spawn(openCmd, { shell: true, stdio: 'ignore', detached: true }).unref();
+}
+
 /** Detiene JMeter de forma limpia y da margen para que escriba el .jtl */
+async function killProcessTree(child) {
+  const isWin = process.platform === 'win32';
+  if (isWin) {
+    // taskkill /T mata el árbol completo (cmd -> jmeter.bat -> java).
+    // child.kill() solo mata el shell y dejaría el JVM corriendo con el .jtl bloqueado (EBUSY).
+    const killTree = spawnSafe('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    await new Promise((resolve) => {
+      killTree.on('exit', resolve);
+      killTree.on('error', resolve);
+      setTimeout(resolve, 5000);
+    });
+    child.kill();
+  } else {
+    child.kill('SIGTERM');
+  }
+  await sleep(2000);
+}
+
 async function stopJmeter(child) {
   if (!child) return;
   if (child.exitCode !== null) {
@@ -271,8 +348,8 @@ async function stopJmeter(child) {
     return;
   }
   child.stopRequested = true;
-  child.kill();
-  console.log('[Runner] Señal de detención enviada a JMeter.');
+  console.log('[Runner] Deteniendo JMeter (todos sus procesos)...');
+  await killProcessTree(child);
   await sleep(3000);
 }
 
@@ -302,6 +379,8 @@ async function main() {
     console.log('[Runner] Reporte HTML: playwright-report/');
 
     await analyzeJtl();
+
+    await openDashboard();
 
     process.exit(exitCode);
   } catch (err) {
