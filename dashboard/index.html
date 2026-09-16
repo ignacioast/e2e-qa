@@ -13,7 +13,7 @@
     <div class="brand">
       <div>
         <h1>E2E QA</h1>
-        <p>Auditoría de calidad · Playwright + JMeter</p>
+        <p>Playwright + JMeter</p>
       </div>
     </div>
     <div class="toolbar">
@@ -23,6 +23,11 @@
   </header>
 
   <main>
+    <div class="notice" id="notice" hidden>
+      Este panel refleja la última auditoría guardada en <code>reports/</code>.
+      Ejecuta <code>npm run test:stress</code> para generar una nueva.
+    </div>
+
     <section id="kpis" class="kpis"></section>
 
     <section class="panel">
@@ -45,6 +50,7 @@
               <th>URL</th>
               <th class="num">Tiempo</th>
               <th class="num">Memoria</th>
+              <th class="num">Forms</th>
               <th>Caché</th>
               <th>Observaciones</th>
               <th>Pantallazo</th>

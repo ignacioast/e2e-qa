@@ -12,6 +12,22 @@ const SHOTS_DIR = path.join(REPORTS_DIR, 'screenshots');
 const ERRORS_SHOTS_DIR = path.join(SHOTS_DIR, 'errors');
 const AUDIT_REPORT = path.join(REPORTS_DIR, 'auditoria.json');
 
+// Borra el contenido de un directorio (sin borrar la carpeta en sí)
+const clearDirContents = (dir) => {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir)) {
+    fs.rmSync(path.join(dir, entry), { recursive: true, force: true });
+  }
+};
+
+// Reinicia la carpeta de pantallazos: cada corrida reemplaza las imágenes
+// de la anterior (la carpeta no debe acumular PNGs huérfanos).
+const resetShotsDirs = () => {
+  clearDirContents(SHOTS_DIR);
+  clearDirContents(ERRORS_SHOTS_DIR);
+  fs.mkdirSync(ERRORS_SHOTS_DIR, { recursive: true });
+};
+
 // Normaliza una URL para comparar sin falsos duplicados (evita "https://ast.cl" vs "https://ast.cl/")
 const normalizeUrl = (u) => {
   try {
@@ -28,6 +44,26 @@ const slugify = (url) => {
     .replace(/[^\w\-]+/g, '_')
     .slice(0, 120);
 };
+
+// Hace scroll real por toda la página (para cargar contenido lazy, formularios,
+// imágenes y demás que solo aparecen al hacer scroll), como haría un usuario.
+async function scrollThroughPage(page) {
+  const dims = await page.evaluate(() => ({ height: document.body.scrollHeight, vh: window.innerHeight }));
+  const total = Math.max(dims.height - dims.vh, 0);
+  const step = Math.max(400, Math.floor(total / 12));
+  for (let y = 0; y < total; y += step) {
+    await page.evaluate((_y) => window.scrollTo(0, _y), y);
+    await page.waitForTimeout(260); // deja tiempo para que carguen las imágenes lazy
+  }
+  await page.evaluate((_total) => window.scrollTo(0, _total), total);
+  await page.waitForTimeout(400);
+  // Hover sobre los enlaces del menú para revelar submenús desplegables
+  const navLinks = await page.locator('nav a, header a, .menu a').all().catch(() => []);
+  for (const link of navLinks.slice(0, 10)) {
+    try { await link.hover().catch(() => {}); await page.waitForTimeout(150); } catch { /* ignorar */ }
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+}
 
 // Extrae enlaces únicos internos del mismo dominio desde toda la página (sin recursión)
 async function collectNavLinks(page, baseDomain) {
@@ -67,8 +103,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       const auditResults = [];
       const cacheHeaders = {};
 
-      fs.mkdirSync(SHOTS_DIR, { recursive: true });
-      fs.mkdirSync(ERRORS_SHOTS_DIR, { recursive: true });
+      resetShotsDirs();
 
       const urlObject = new URL(urlBase);
       const baseDomain = urlObject.hostname.replace('www.', '');
@@ -140,12 +175,21 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         // --- CACHÉ ---
         const cache = cacheHeaders[normalized] || 'sin Cache-Control';
 
+        // --- SCROLL REAL POR LA PÁGINA (carga lazy: forms, imágenes, submenús) ---
+        console.log(`  [Scroll]  Recorriendo la página completa...`);
+        const scrollStart = Date.now();
+        await scrollThroughPage(page);
+        console.log(`  [Scroll]  ${Date.now() - scrollStart} ms de scroll autónomo`);
+
         // --- CHECKS DE CALIDAD HTML ---
         const htmlChecks = await page.evaluate(() => {
           return {
             title: document.title || '',
             h1: document.querySelector('h1')?.textContent?.trim().slice(0, 80) || '',
             imgSinAlt: [...document.querySelectorAll('img')].filter((i) => !i.getAttribute('alt')).length,
+            forms: document.querySelectorAll('form').length,
+            inputs: [...document.querySelectorAll('input, select, textarea')].length,
+            buttons: document.querySelectorAll('button, [type="submit"], [type="button"]').length,
           };
         });
         if (!htmlChecks.title) issues.push('Página sin <title>');
@@ -168,11 +212,15 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         console.log(`  [Memoria] ${memoryMB} MB`);
         console.log(`  [Cache]   ${cache}`);
         console.log(`  [Title]   ${htmlChecks.title || '(sin title)'}`);
+        console.log(`  [Forms]   ${htmlChecks.forms} formulario(s) · ${htmlChecks.inputs} campo(s) · ${htmlChecks.buttons} botón(es)`);
         if (pageIssues.length) console.log(`  [Issue]   ${pageIssues.join(' | ')}`);
 
         auditResults.push({
           url, status: 'OK', loadMs, memoryMB, cache,
           title: htmlChecks.title,
+          forms: htmlChecks.forms,
+          inputs: htmlChecks.inputs,
+          buttons: htmlChecks.buttons,
           issues: pageIssues,
           screenshot: shotRel,
         });
@@ -183,7 +231,18 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       await auditPage(urlBase, 'Página base');
 
       // --- PASO 2: TODOS los enlaces internos (sin límite, sin círculos) ---
-      const navLinks = await collectNavLinks(page, baseDomain);
+      // El sitio responde a veces una versión reducida (anti-bot) sin enlaces:
+      // si no detectamos nada, esperamos y reintentamos antes de rendirnos.
+      let navLinks = [];
+      for (let attempt = 1; attempt <= 3 && !navLinks.length; attempt++) {
+        navLinks = await collectNavLinks(page, baseDomain);
+        if (!navLinks.length && attempt < 3) {
+          console.log(`[Crawler] 0 enlaces detectados (posible respuesta reducida). Reintentando en 2 s... (${attempt}/3)`);
+          await page.waitForTimeout(2000);
+          await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          await page.waitForTimeout(1000);
+        }
+      }
       console.log(`[Auditoría] ${navLinks.length} enlaces internos detectados. Auditando todos...`);
 
       for (const link of navLinks) {

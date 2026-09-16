@@ -212,6 +212,17 @@ td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font
   border-radius: 6px;
 }
 
+.notice {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+.notice code { font-family: var(--mono); }
+
 /* ---------- Lightbox ---------- */
 .lightbox {
   position: fixed;

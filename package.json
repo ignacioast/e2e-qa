@@ -4,7 +4,9 @@
     "test:stress": "node scripts/runner.js",
     "test:stress:ui": "playwright test --ui",
     "test:stress:docker": "docker compose up --build --abort-on-container-exit --remove-orphans",
-    "dashboard": "node scripts/dashboard.js"
+    "dashboard": "node scripts/dashboard.js",
+    "dashboard:lan": "HOST=0.0.0.0 node scripts/dashboard.js",
+    "dashboard:local": "HOST=127.0.0.1 PORT=3000 node scripts/dashboard.js"
   },
   "dependencies": {
     "@playwright/test": "^1.63.0"

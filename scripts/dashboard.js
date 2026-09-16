@@ -19,6 +19,9 @@ const PROJECT_ROOT = path.join(__dirname, '..');
 const REPORTS_DIR = path.join(PROJECT_ROOT, 'reports');
 const WEB_DIR = path.join(PROJECT_ROOT, 'dashboard');
 const PORT = process.env.PORT || 3000;
+// HOST '0.0.0.0' expone el dashboard a toda la red local (LAN).
+// Para acceso solo local: HOST=127.0.0.1; detrás de nginx: HOST=127.0.0.1.
+const HOST = process.env.HOST || '0.0.0.0';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -95,6 +98,17 @@ const server = http.createServer((req, res) => {
   res.end('Not found');
 });
 
-server.listen(PORT, () => {
-  console.log(`[Dashboard] Web local en http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`[Dashboard] Web en http://localhost:${PORT}`);
+  if (HOST === '0.0.0.0') {
+    console.log('[Dashboard] Visible en tu red local (LAN). Avisa a tus compañeros con tu IP:');
+    const nets = require('os').networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name] || []) {
+        if (net.family === 'IPv4' && !net.internal) {
+          console.log(`  │  http://${net.address}:${PORT}   (${name})`);
+        }
+      }
+    }
+  }
 });

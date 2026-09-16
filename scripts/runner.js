@@ -276,7 +276,7 @@ async function analyzeJtl() {
   console.log(`[JMeter] Latencia promedio  : ${resumen.latenciaPromedioMs} ms | máxima ${maxElapsed} ms`);
 
   if (userErrors.length) {
-    console.log('\n[JMeter] ⚠️  La página se rompió en estos usuarios:');
+    console.log('\n[JMeter] ------  La página se rompió en estos usuarios:');
     for (const u of userErrors) {
       console.log(`  · ${u.usuario} → ${u.errores} errores de ${u.peticiones} peticiones`);
     }

@@ -27,6 +27,7 @@ async function load() {
   stamp.textContent = ts ? 'Última ejecución: ' + new Date(ts).toLocaleString('es-CL') : 'Sin datos de ejecución';
 
   renderKPIs(audit, jmeter);
+  $('#notice').hidden = !(isEmpty(audit) || isEmpty(jmeter));
   const search = $('#search');
   const filter = $('#filterStatus');
   renderAudit(audit, search.value.trim(), filter.value);
@@ -34,11 +35,16 @@ async function load() {
 }
 
 /* ---------- KPIs ---------- */
+// La API devuelve { error: '...' } cuando aún no existe el reporte
+const isEmpty = (data) => !data || !!data.error;
+
 function renderKPIs(audit, jmeter) {
   const box = $('#kpis');
+  const noAudit = isEmpty(audit);
+  const noJmeter = isEmpty(jmeter);
   const cards = [];
 
-  if (audit) {
+  if (!noAudit) {
     cards.push(kpi('Dominio', audit.dominio || '—', '', 'accent'));
     cards.push(kpi('Páginas', audit.totalPaginas, 'auditadas'));
     cards.push(kpi('OK', audit.ok, 'sin problemas', 'ok'));
@@ -47,7 +53,7 @@ function renderKPIs(audit, jmeter) {
     cards.push(kpi('Auditoría', '—', 'corre primero npm run test:stress', 'muted'));
   }
 
-  if (jmeter) {
+  if (!noJmeter) {
     cards.push(kpi('Usuarios JMeter', jmeter.totalUsuarios, 'simultáneos', 'accent'));
     cards.push(kpi('Peticiones', jmeter.totalPeticiones, 'requests'));
     const pct = jmeter.porcentajeError ?? 0;
@@ -90,6 +96,7 @@ function renderAudit(audit, search, statusFilter) {
         '<td class="url">' + esc(p.url) + '</td>' +
         '<td class="num">' + esc(p.loadMs) + '</td>' +
         '<td class="num">' + esc(p.memoryMB) + '</td>' +
+        '<td class="num">' + formsCell(p) + '</td>' +
         '<td>' + esc(p.cache) + '</td>' +
         '<td class="issue">' + issues + '</td>' +
         '<td>' + shot + '</td>' +
@@ -98,6 +105,12 @@ function renderAudit(audit, search, statusFilter) {
     .join('');
 
   tbody.innerHTML = rows || '<tr><td colspan="7" class="empty">Sin resultados para ese filtro.</td></tr>';
+}
+
+function formsCell(p) {
+  const n = p.forms;
+  if (!n || n === 0) return '<span class="muted">—</span>';
+  return String(n) + '<div class="muted" style="font-size:11px">' + (p.inputs || 0) + ' campos</div>';
 }
 
 function esc(s) {
@@ -109,8 +122,8 @@ function esc(s) {
 /* ---------- JMeter ---------- */
 function renderJmeter(jmeter) {
   const box = $('#jmeter');
-  if (!jmeter) {
-    box.innerHTML = '<div class="empty">Aún no hay reporte de estrés. Ejecuta primero: npm run test:stress</div>';
+  if (isEmpty(jmeter)) {
+    box.innerHTML = '<div class="empty">No hay reporte de estrés de la última corrida. Ejecuta primero: npm run test:stress</div>';
     return;
   }
 
