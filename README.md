@@ -16,6 +16,11 @@ npm install
 
 Abre una terminal nueva.
 
+## Agregar sitios a auditar
+
+Edita `data/urls.json` y agrega las URLs (una por linea). Cada dominio se audita
+y aparece en el dashboard con su propio reporte.
+
 ## Comandos
 
 | Comando | Que hace |

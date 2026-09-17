@@ -2,7 +2,12 @@
 
 const $ = (sel) => document.querySelector(sel);
 
-let state = { audit: null, jmeter: null };
+let state = {
+  sites: [],
+  audit: {},
+  jmeter: {},
+  currentKey: null,
+};
 
 async function fetchJSON(url) {
   try {
@@ -15,16 +20,114 @@ async function fetchJSON(url) {
 }
 
 async function load() {
-  const [audit, jmeter] = await Promise.all([
+  const [authSites, auditMap, jmeterMap] = await Promise.all([
+    fetchJSON('/api/sites'),
     fetchJSON('/api/auditoria'),
     fetchJSON('/api/jmeter'),
   ]);
-  state.audit = audit;
-  state.jmeter = jmeter;
+
+  state.sites = Array.isArray(authSites) ? authSites : [];
+  state.audit = auditMap && !auditMap.error ? auditMap : {};
+  state.jmeter = jmeterMap && !jmeterMap.error ? jmeterMap : {};
+
+  // Si hay una ejecución en curso, activar el polling.
+  const status = await fetchJSON('/api/run/status');
+  state.run = status || { running: false, site: null, startedAt: null, tail: '' };
+
+  const requested = new URLSearchParams(location.search).get('site');
+  const selected = state.sites.find((s) => s.key === requested) ? requested : null;
+
+  fillSiteSelect();
+  if (selected) renderDetail(selected);
+  else renderHome();
+}
+
+/* ---------- Vista Inicio: selector de sitios ---------- */
+function renderHome() {
+  state.currentKey = null;
+  $('#homeView').hidden = false;
+  $('#addSitePanel').hidden = false;
+  $('#detailView').hidden = true;
+  $('#backHome').hidden = true;
+  $('#siteSelect').hidden = true;
+
+  const count = state.sites.length;
+  $('#sitesCount').textContent = count ? `(${count} ${count === 1 ? 'sitio' : 'sitios'})` : '';
+
+  if (!count) {
+    $('#siteCards').innerHTML =
+      '<div class="empty">No hay sitios configurados. Agrega URLs en <code>data/urls.json</code>.</div>';
+    return;
+  }
+
+  $('#siteCards').innerHTML = state.sites.map((site) => {
+    const a = state.audit[site.key];
+    const j = state.jmeter[site.key];
+    const hasAudit = !isEmpty(a);
+    const hasJmeter = !isEmpty(j);
+    const stamp = hasAudit
+      ? (a.ejecutado || j?.fecha)
+      : hasJmeter ? j.fecha : null;
+
+    const cells = [];
+    if (hasAudit) {
+      cells.push('<div class="cell"><span class="cell-label">Páginas</span><span class="cell-value">' + a.totalPaginas + '</span></div>');
+      cells.push('<div class="cell"><span class="cell-label">OK</span><span class="cell-value ok">' + a.ok + '</span></div>');
+      cells.push('<div class="cell"><span class="cell-label">Fallidas</span><span class="cell-value ' + (a.fallidas > 0 ? 'bad' : '') + '">' + a.fallidas + '</span></div>');
+    } else if (hasJmeter) {
+      cells.push('<div class="cell"><span class="cell-label">Solo estrés</span><span class="cell-value muted">sin auditoría</span></div>');
+    } else {
+      cells.push('<div class="cell"><span class="cell-label">Estado</span><span class="cell-value bad">sin datos</span></div>');
+    }
+    if (hasJmeter) {
+      const pct = j.porcentajeError ?? 0;
+      cells.push('<div class="cell"><span class="cell-label">Peticiones</span><span class="cell-value">' + j.totalPeticiones + '</span></div>');
+      cells.push('<div class="cell"><span class="cell-label">Error</span><span class="cell-value ' + (pct > 0 ? 'bad' : 'ok') + '">' + pct + '%</span></div>');
+    }
+
+    const stampHtml = stamp
+      ? '<div class="site-stamp">Última ejecución: ' + new Date(stamp).toLocaleString('es-CL') + '</div>'
+      : '<div class="site-stamp">Sin ejecuciones aún</div>';
+
+    const runBtn = state.run && state.run.running && state.run.site === site.key
+      ? '<button class="btn btn-ghost btn-sm" disabled>Ejecutando…</button>'
+      : '<button class="btn btn-ghost btn-sm" data-run="' + esc(site.key) + '">Ejecutar estrés</button>';
+
+    return '<div class="site-card" data-site="' + esc(site.key) + '">' +
+      '<div class="site-title"><span class="site-dot"></span>' + esc(site.dominio) + '</div>' +
+      '<div class="site-url">' + esc(site.url) + '</div>' +
+      '<div class="site-cells">' + cells.join('') + '</div>' +
+      stampHtml +
+      '<div class="site-actions">' + runBtn + '</div>' +
+      '</div>';
+  }).join('');
+}
+
+function fillSiteSelect() {
+  const sel = $('#siteSelect');
+  sel.innerHTML = state.sites.map((s) =>
+    '<option value="' + esc(s.key) + '"' + (s.key === state.currentKey ? ' selected' : '') + '>' + esc(s.dominio) + '</option>'
+  ).join('') || '<option value="">Sin sitios</option>';
+}
+
+/* ---------- Vista Detalle: reporte de un sitio ---------- */
+function renderDetail(key) {
+  state.currentKey = key;
+  $('#homeView').hidden = true;
+  $('#addSitePanel').hidden = true;
+  $('#detailView').hidden = false;
+  $('#backHome').hidden = false;
+  $('#siteSelect').hidden = false;
+  fillSiteSelect();
+
+  const audit = state.audit[key] || null;
+  const jmeter = state.jmeter[key] || null;
 
   const stamp = $('#stamp');
   const ts = audit?.ejecutado || jmeter?.fecha;
-  stamp.textContent = ts ? 'Última ejecución: ' + new Date(ts).toLocaleString('es-CL') : 'Sin datos de ejecución';
+  stamp.textContent = ts
+    ? 'Última ejecución: ' + new Date(ts).toLocaleString('es-CL')
+    : 'Sin datos de ejecución para este sitio';
 
   renderKPIs(audit, jmeter);
   $('#notice').hidden = !(isEmpty(audit) || isEmpty(jmeter));
@@ -123,7 +226,7 @@ function esc(s) {
 function renderJmeter(jmeter) {
   const box = $('#jmeter');
   if (isEmpty(jmeter)) {
-    box.innerHTML = '<div class="empty">No hay reporte de estrés de la última corrida. Ejecuta primero: npm run test:stress</div>';
+    box.innerHTML = '<div class="empty">No hay reporte de estrés para este sitio. Ejecuta primero: npm run test:stress</div>';
     return;
   }
 
@@ -174,12 +277,117 @@ function closeLightbox() {
   $('#lightbox img').src = '';
 }
 
+/* ---------- Ejecución de estrés por sitio ---------- */
+let runTimer = null;
+
+async function runSite(key) {
+  if (runTimer) return;
+  const msg = $('#runStatus');
+  msg.hidden = false;
+  msg.className = 'run-status running';
+  msg.textContent = 'Ejecutando estrés para ' + (state.sites.find((s) => s.key === key)?.dominio || key) + '…';
+
+  try {
+    const res = await fetch('/api/run/start/' + encodeURIComponent(key), { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      msg.className = 'run-status bad';
+      msg.textContent = data.error || 'No se pudo iniciar.';
+      return;
+    }
+    state.run = { running: true, site: key, startedAt: new Date().toISOString(), tail: '' };
+    pollRun(key);
+  } catch {
+    msg.className = 'run-status bad';
+    msg.textContent = 'Error de conexión.';
+  }
+}
+
+function pollRun(key) {
+  if (runTimer) clearInterval(runTimer);
+  runTimer = setInterval(async () => {
+    try {
+      const s = await fetchJSON('/api/run/status');
+      state.run = s || state.run;
+      if (s && s.tail) {
+        $('#runStatus').textContent = s.tail.slice(-180);
+      }
+      if (s && !s.running) {
+        clearInterval(runTimer);
+        runTimer = null;
+        const msg = $('#runStatus');
+        msg.className = 'run-status ok';
+        msg.textContent = 'Auditoría finalizada. Actualizando datos…';
+        setTimeout(() => { msg.hidden = true; load(); }, 1200);
+      }
+    } catch {
+      // sigue intentando
+    }
+  }, 2500);
+}
+
 /* ---------- Events ---------- */
 $('#refresh').addEventListener('click', load);
-$('#search').addEventListener('input', (e) => renderAudit(state.audit, e.target.value.trim(), $('#filterStatus').value));
-$('#filterStatus').addEventListener('change', (e) => renderAudit(state.audit, $('#search').value.trim(), e.target.value));
+$('#search').addEventListener('input', (e) => {
+  if (!state.currentKey) return;
+  renderAudit(state.audit[state.currentKey], e.target.value.trim(), $('#filterStatus').value);
+});
+$('#filterStatus').addEventListener('change', (e) => {
+  if (!state.currentKey) return;
+  renderAudit(state.audit[state.currentKey], $('#search').value.trim(), e.target.value);
+});
+$('#siteSelect').addEventListener('change', (e) => {
+  if (e.target.value) location.search = '?site=' + encodeURIComponent(e.target.value);
+});
+
+// Botones "Ejecutar estrés" de las tarjetas (delegado)
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-run]');
+  if (btn) {
+    e.stopPropagation();
+    e.preventDefault();
+    runSite(btn.dataset.run);
+    return;
+  }
+  const card = e.target.closest('.site-card');
+  if (card && card.dataset.site) {
+    location.search = '?site=' + encodeURIComponent(card.dataset.site);
+  }
+});
+
 $('#lbClose').addEventListener('click', closeLightbox);
 $('#lightbox').addEventListener('click', (e) => { if (e.target === $('#lightbox')) closeLightbox(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
+
+// Agregar un sitio desde el dashboard (se guarda en data/urls.json)
+$('#addSiteForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#siteUrl');
+  const msg = $('#addSiteMsg');
+  msg.hidden = true;
+  try {
+    const res = await fetch('/api/sites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: input.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error || 'No se pudo agregar.';
+      msg.className = 'form-msg bad';
+      msg.hidden = false;
+      return;
+    }
+    msg.textContent = 'Sitio agregado: ' + (data.sites[data.sites.length - 1].dominio || input.value);
+    msg.className = 'form-msg ok';
+    msg.hidden = false;
+    input.value = '';
+    await load();
+  } catch {
+    msg.textContent = 'Error de conexión.';
+    msg.className = 'form-msg bad';
+    msg.hidden = false;
+  }
+});
 
 load();

@@ -57,6 +57,75 @@ body {
   transition: background .15s;
 }
 .btn:hover { background: var(--accent-dark); border-color: var(--accent-dark); }
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.btn-ghost:hover { background: var(--panel-2); border-color: var(--border); }
+
+/* ---------- Selector de sitios (vista inicio) ---------- */
+.sites {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.site-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color .15s, box-shadow .15s;
+}
+.site-card:hover { border-color: var(--accent); box-shadow: 0 4px 14px rgba(37, 99, 235, .12); }
+.site-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
+.site-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.site-url { color: var(--muted); font-size: 12px; font-family: var(--mono); word-break: break-all; }
+.site-cells { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.cell {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 6px 10px;
+  min-width: 74px;
+  text-align: center;
+}
+.cell-label { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+.cell-value { font-family: var(--mono); font-size: 16px; font-weight: 600; }
+.cell-value.ok { color: var(--ok); }
+.cell-value.bad { color: var(--bad); }
+.site-stamp { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-top: auto; }
+.site-actions { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+.btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 5px; }
+
+/* ---------- Estado de ejecución ---------- */
+.run-status {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--mono);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.run-status.running { border-color: #bfdbfe; background: #eff6ff; color: #1e40af; }
+.run-status.ok { border-color: #b7f0cd; background: #ecfdf3; color: var(--ok); }
+.run-status.bad { border-color: #f6c8c8; background: #fef2f2; color: var(--bad); }
+
+/* ---------- Agregar sitio ---------- */
+.add-site-form { display: flex; gap: 10px; flex-wrap: wrap; }
+.add-site-form .input { flex: 1; min-width: 240px; }
+.form-msg { margin-top: 12px; font-size: 13px; }
+.form-msg.ok { color: var(--ok); }
+.form-msg.bad { color: var(--bad); }
 
 /* ---------- Layout ---------- */
 main { max-width: 1240px; margin: 22px auto; padding: 0 24px; }

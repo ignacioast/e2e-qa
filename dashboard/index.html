@@ -18,59 +18,86 @@
     </div>
     <div class="toolbar">
       <span class="stamp" id="stamp">—</span>
+      <select id="siteSelect" class="input" hidden aria-label="Seleccionar sitio"></select>
+      <a id="backHome" href="/" class="btn btn-ghost" hidden>Ver todos los sitios</a>
       <button class="btn" id="refresh" type="button">Recargar</button>
     </div>
   </header>
 
   <main>
-    <div class="notice" id="notice" hidden>
-      Este panel refleja la última auditoría guardada en <code>reports/</code>.
-      Ejecuta <code>npm run test:stress</code> para generar una nueva.
-    </div>
-
-    <section id="kpis" class="kpis"></section>
-
-    <section class="panel">
+    <!-- Vista Inicio: selector de sitios -->
+    <section id="homeView" class="panel">
       <div class="panel-head">
-        <h2>Páginas auditadas <span class="muted">(Playwright)</span></h2>
-        <div class="controls">
-          <input id="search" class="input" type="search" placeholder="Filtrar por URL...">
-          <select id="filterStatus" class="input" aria-label="Filtrar por estado">
-            <option value="all">Todos los estados</option>
-            <option value="OK">Solo OK</option>
-            <option value="FALLÓ">Solo fallidas</option>
-          </select>
+        <h2>Sitios analizados <span class="muted" id="sitesCount"></span></h2>
+      </div>
+      <div id="runStatus" class="run-status" hidden></div>
+      <div id="siteCards" class="sites"></div>
+    </section>
+
+    <!-- Agregar sitio -->
+    <section id="addSitePanel" class="panel">
+      <div class="panel-head">
+        <h2>Agregar otro sitio</h2>
+        <span class="muted">Se auditará en la próxima corrida</span>
+      </div>
+      <form id="addSiteForm" class="add-site-form">
+        <input id="siteUrl" class="input" type="url" placeholder="https://ejemplo.cl" required>
+        <button class="btn" type="submit">Agregar sitio</button>
+      </form>
+      <p id="addSiteMsg" class="form-msg" hidden></p>
+    </section>
+
+    <!-- Vista Detalle: reporte de un sitio -->
+    <div id="detailView" hidden>
+      <div class="notice" id="notice" hidden>
+        Este panel refleja la última auditoría guardada en <code>reports/</code>.
+        Ejecuta <code>npm run test:stress</code> para generar una nueva.
+      </div>
+
+      <section id="kpis" class="kpis"></section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Páginas auditadas <span class="muted">(Playwright)</span></h2>
+          <div class="controls">
+            <input id="search" class="input" type="search" placeholder="Filtrar por URL...">
+            <select id="filterStatus" class="input" aria-label="Filtrar por estado">
+              <option value="all">Todos los estados</option>
+              <option value="OK">Solo OK</option>
+              <option value="FALLÓ">Solo fallidas</option>
+            </select>
+          </div>
         </div>
-      </div>
-      <div class="table-wrap">
-        <table class="table" id="auditTable">
-          <thead>
-            <tr>
-              <th>Estado</th>
-              <th>URL</th>
-              <th class="num">Tiempo</th>
-              <th class="num">Memoria</th>
-              <th class="num">Forms</th>
-              <th>Caché</th>
-              <th>Observaciones</th>
-              <th>Pantallazo</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
+        <div class="table-wrap">
+          <table class="table" id="auditTable">
+            <thead>
+              <tr>
+                <th>Estado</th>
+                <th>URL</th>
+                <th class="num">Tiempo</th>
+                <th class="num">Memoria</th>
+                <th class="num">Forms</th>
+                <th>Caché</th>
+                <th>Observaciones</th>
+                <th>Pantallazo</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Resultados de carga <span class="muted">(JMeter)</span></h2>
-      </div>
-      <div id="jmeter" class="jmeter"></div>
-    </section>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Resultados de carga <span class="muted">(JMeter)</span></h2>
+        </div>
+        <div id="jmeter" class="jmeter"></div>
+      </section>
+    </div>
   </main>
 
   <footer class="footer">
-    Datos: <code>reports/auditoria.json</code> · <code>reports/jmeter_resumen.json</code>
+    Datos: <code>reports/auditoria/&lt;sitio&gt;.json</code> · <code>reports/jmeter/&lt;sitio&gt;.json</code>
   </footer>
 
   <div id="lightbox" class="lightbox" hidden>

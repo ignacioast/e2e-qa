@@ -15,6 +15,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { siteKey } = require('./site.js');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const JMETER_DIR = path.join(PROJECT_ROOT, 'jmeter');
@@ -148,13 +149,19 @@ async function startJmeter() {
  * Ejecuta la suite nativa de Playwright desde la raíz del proyecto.
  * Resuelve con el código de salida de Playwright.
  */
-function runPlaywright() {
+function runPlaywright(runSite) {
   return new Promise((resolve, reject) => {
     console.log('[Runner] Ejecutando suite Playwright (npx playwright test)...');
     const exe = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const env = { ...process.env };
+    if (runSite) {
+      // Filtra la suite a un solo sitio (data/urls.json) pasando su siteKey.
+      env.TEST_SITE = runSite;
+    }
     const child = spawnSafe(exe, ['playwright', 'test'], {
       cwd: PROJECT_ROOT,
       stdio: 'inherit',
+      env,
     });
 
     child.on('error', (err) => reject(new Error(`No se pudo ejecutar Playwright: ${err.message}`)));
@@ -167,11 +174,18 @@ function runPlaywright() {
  *  - Cuántas peticiones se hicieron y cuántas fallaron (%).
  *  - En qué usuario(n) concreto se rompió la página (threadName = usuario JMeter).
  *  - Latencia promedio / máxima.
- * Genera reports/jmeter_resumen.json (consumido por la web local).
+ * Genera reports/jmeter/<siteKey>.json (consumido por la web local).
+ * El sitio se deriva del dominio del plan JMX (carga_ast.jmx -> ast).
  */
 async function analyzeJtl() {
-  const outDir = path.join(PROJECT_ROOT, 'reports');
-  const outFile = path.join(outDir, 'jmeter_resumen.json');
+  // El dominio del plan JMX define a qué sitio corresponden estos resultados.
+  const plan = fs.readFileSync(JMETER_PLAN, 'utf-8');
+  const udvMatch = plan.match(/Argument\.value">([^<]+)<\/stringProp>/g) || [];
+  const domain = udvMatch[1] ? udvMatch[1].replace(/.*Argument\.value">|<\/stringProp>/g, '') : 'ast.cl';
+  const jmeterSiteKey = siteKey(`https://${domain}`);
+
+  const outDir = path.join(PROJECT_ROOT, 'reports', 'jmeter');
+  const outFile = path.join(outDir, `${jmeterSiteKey}.json`);
 
   if (!fs.existsSync(RESULT_FILE)) {
     console.error('[Runner] No se encontró el JTL para analizar.');
@@ -292,14 +306,16 @@ async function analyzeJtl() {
  * Abre la web local del dashboard al terminar el estrés (solo en uso local).
  * En CI (GitHub Actions) se omite para no colgar/abrir navegador sin sentido.
  */
-async function openDashboard() {
+async function openDashboard(runSite) {
   if (process.env.CI) {
     console.log('[Runner] Entorno CI detectado, saltando apertura del dashboard.');
     return;
   }
 
   const port = process.env.PORT || 3000;
-  const url = `http://localhost:${port}`;
+  const url = runSite
+    ? `http://localhost:${port}/?site=${encodeURIComponent(runSite)}`
+    : `http://localhost:${port}`;
   const dashboardScript = path.join(__dirname, 'dashboard.js');
 
   const dashCmd = `"${process.execPath}" "${dashboardScript}"`;
@@ -355,6 +371,23 @@ async function stopJmeter(child) {
 
 async function main() {
   let jmeter;
+  let ranJmeter = true;
+
+  // --site=<key> : solo audita (y estresa, si aplica) ese sitio.
+  const runSiteArg = process.argv.find((a) => a.startsWith('--site='));
+  const runSite = runSiteArg ? runSiteArg.split('=')[1] : null;
+
+  // Valida que el sitio pedido esté en data/urls.json
+  if (runSite) {
+    const urlsPath = path.join(PROJECT_ROOT, 'data', 'urls.json');
+    const urls = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'));
+    const known = new Set(urls.map((u) => siteKey(u)));
+    if (!known.has(runSite)) {
+      console.error(`[Runner] ERROR: el sitio "${runSite}" no está en data/urls.json.`);
+      console.error(`Sitios conocidos: ${[...known].join(', ')}`);
+      process.exit(1);
+    }
+  }
 
   const onInterrupt = async () => {
     console.log('\n[Runner] Interrupción recibida, deteniendo JMeter...');
@@ -365,22 +398,42 @@ async function main() {
   process.once('SIGTERM', onInterrupt);
 
   try {
-    jmeter = await startJmeter();
+    // El estrés JMeter solo corresponde al dominio del plan (ast.cl).
+    // Si pedimos otro sitio, Playwright audita solo ese y no se corre JMeter.
+    const jmeterSiteKey = (() => {
+      const plan = fs.readFileSync(JMETER_PLAN, 'utf-8');
+      const udvMatch = plan.match(/Argument\.value">([^<]+)<\/stringProp>/g) || [];
+      const domain = udvMatch[1] ? udvMatch[1].replace(/.*Argument\.value">|<\/stringProp>/g, '') : 'ast.cl';
+      return siteKey(`https://${domain}`);
+    })();
 
-    console.log(`[Runner] Dando ${LOAD_SETTLE_TIME_MS / 1000} s para que la carga se establezca...`);
-    await sleep(LOAD_SETTLE_TIME_MS);
+    if (runSite && runSite !== jmeterSiteKey) {
+      console.log(`[Runner] Solo se auditará el sitio "${runSite}" (sin estrés JMeter, que apunta a "${jmeterSiteKey}").`);
+      ranJmeter = false;
+    }
 
-    const exitCode = await runPlaywright();
+    if (ranJmeter) {
+      jmeter = await startJmeter();
 
-    console.log(`[Runner] Playwright finalizó con código ${exitCode}. Deteniendo JMeter...`);
-    await stopJmeter(jmeter);
+      console.log(`[Runner] Dando ${LOAD_SETTLE_TIME_MS / 1000} s para que la carga se establezca...`);
+      await sleep(LOAD_SETTLE_TIME_MS);
+    }
 
-    console.log('[Runner] Estrés finalizado.');
-    console.log('[Runner] Reporte HTML: playwright-report/');
+    const exitCode = await runPlaywright(runSite);
 
-    await analyzeJtl();
+    if (ranJmeter) {
+      console.log(`[Runner] Playwright finalizó con código ${exitCode}. Deteniendo JMeter...`);
+      await stopJmeter(jmeter);
 
-    await openDashboard();
+      console.log('[Runner] Estrés finalizado.');
+      console.log('[Runner] Reporte HTML: playwright-report/');
+
+      await analyzeJtl();
+    } else {
+      console.log('[Runner] Auditoría finalizada (sin estrés JMeter).');
+    }
+
+    await openDashboard(runSite);
 
     process.exit(exitCode);
   } catch (err) {

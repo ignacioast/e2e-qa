@@ -16,7 +16,9 @@ module.exports = defineConfig({
   reporter: 'html',
   use: {
     headless: process.env.PW_HEADLESS === 'true',
-    viewport: { width: 1280, height: 720 },
+    // Escritorio ancho (1440): con fullPage:true los pantallazos ya no quedan
+    // como tiras estrechas "de celular" (antes: viewport 1280).
+    viewport: { width: 1440, height: 900 },
     ignoreHTTPSErrors: true,
     channel,
     screenshot: 'only-on-failure',     // Captura de pantalla automática al fallar

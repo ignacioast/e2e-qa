@@ -1,16 +1,24 @@
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import site from '../scripts/site.js';
 
 // Carga las URLs dinámicas provistas por el equipo de I+D+i (data/urls.json)
 const urlsPath = path.resolve(__dirname, '..', 'data', 'urls.json');
-const targetUrls = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'));
+const allUrls = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'));
+// TEST_SITE=<siteKey> : limita la suite a un solo sitio (ej. runner --site=ast).
+const filterSite = process.env.TEST_SITE;
+const targetUrls = filterSite
+  ? allUrls.filter((u) => site.siteKey(u) === filterSite)
+  : allUrls;
 
-// Reportes y screenshots
+// Reportes y screenshots (por sitio: cada dominio escribe en su propia carpeta)
 const REPORTS_DIR = path.resolve(__dirname, '..', 'reports');
-const SHOTS_DIR = path.join(REPORTS_DIR, 'screenshots');
-const ERRORS_SHOTS_DIR = path.join(SHOTS_DIR, 'errors');
-const AUDIT_REPORT = path.join(REPORTS_DIR, 'auditoria.json');
+const SHOTS_BASE = path.join(REPORTS_DIR, 'screenshots');
+const AUDIT_DIR = path.join(REPORTS_DIR, 'auditoria');
+
+// Reporte de auditoría de UN sitio
+const auditReportPath = (siteKey) => path.join(AUDIT_DIR, `${siteKey}.json`);
 
 // Borra el contenido de un directorio (sin borrar la carpeta en sí)
 const clearDirContents = (dir) => {
@@ -20,12 +28,13 @@ const clearDirContents = (dir) => {
   }
 };
 
-// Reinicia la carpeta de pantallazos: cada corrida reemplaza las imágenes
-// de la anterior (la carpeta no debe acumular PNGs huérfanos).
-const resetShotsDirs = () => {
-  clearDirContents(SHOTS_DIR);
-  clearDirContents(ERRORS_SHOTS_DIR);
-  fs.mkdirSync(ERRORS_SHOTS_DIR, { recursive: true });
+// Reinicia la carpeta de pantallazos de UN sitio: cada corrida reemplaza las
+// imágenes de la anterior (no acumula PNGs huérfanos).
+const resetShotsDirs = (shotsDir) => {
+  const errorsDir = path.join(shotsDir, 'errors');
+  clearDirContents(shotsDir);
+  clearDirContents(errorsDir);
+  fs.mkdirSync(errorsDir, { recursive: true });
 };
 
 // Normaliza una URL para comparar sin falsos duplicados (evita "https://ast.cl" vs "https://ast.cl/")
@@ -98,12 +107,16 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
 
   targetUrls.forEach((urlBase) => {
     test(`Análisis de cobertura funcional, memoria y caché en: ${urlBase}`, async ({ page }) => {
+      const siteKey = site.siteKey(urlBase);
+      const SHOTS_DIR = path.join(SHOTS_BASE, siteKey);
+      const ERRORS_SHOTS_DIR = path.join(SHOTS_DIR, 'errors');
+
       const baseKey = normalizeUrl(urlBase);
       const visitedPages = new Set([baseKey]);
       const auditResults = [];
       const cacheHeaders = {};
 
-      resetShotsDirs();
+      resetShotsDirs(SHOTS_DIR);
 
       const urlObject = new URL(urlBase);
       const baseDomain = urlObject.hostname.replace('www.', '');
@@ -201,7 +214,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         let shotRel = null;
         try {
           await page.screenshot({ path: path.join(SHOTS_DIR, shotName), fullPage: true });
-          shotRel = `screenshots/${shotName}`;
+          shotRel = `screenshots/${siteKey}/${shotName}`;
         } catch { /* no crítico */ }
 
         const pageIssues = [...issues, ...consoleErrors.slice(0, 5)];
@@ -251,9 +264,9 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`);
       }
 
-      // --- GUARDAR REPORTE JSON ---
-      fs.mkdirSync(REPORTS_DIR, { recursive: true });
-      fs.writeFileSync(AUDIT_REPORT, JSON.stringify({
+      // --- GUARDAR REPORTE JSON (por sitio) ---
+      fs.mkdirSync(AUDIT_DIR, { recursive: true });
+      fs.writeFileSync(auditReportPath(siteKey), JSON.stringify({
         dominio: baseDomain,
         ejecutado: new Date().toISOString(),
         totalPaginas: auditResults.length,
