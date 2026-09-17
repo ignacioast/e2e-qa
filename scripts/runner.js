@@ -298,7 +298,7 @@ async function analyzeJtl() {
       console.log(`\n[JMeter] Primer fallo registrado: usuario ${firstError.thread}, código ${firstError.code}, label "${firstError.label}"`);
     }
   } else {
-    console.log('\n[JMeter] ✅ Sin errores: ninguna página se rompió bajo carga.');
+    console.log('\n[JMeter] --- Sin errores: ninguna página se rompió bajo carga.');
   }
 }
 

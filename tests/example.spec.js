@@ -161,7 +161,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
 
           // Pantallazo del error (si la página sigue viva)
           try {
-            await page.screenshot({ path: path.join(ERRORS_SHOTS_DIR, `${slugify(url)}_error.png`), fullPage: true });
+            await page.screenshot({ path: path.join(ERRORS_SHOTS_DIR, `${slugify(url)}_error.png`) });
             console.log(`[Pantallazo] Guardado en reports/screenshots/errors/${slugify(url)}_error.png`);
           } catch { /* página cerrada */ }
 
@@ -213,7 +213,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         const shotName = `${slugify(url)}.png`;
         let shotRel = null;
         try {
-          await page.screenshot({ path: path.join(SHOTS_DIR, shotName), fullPage: true });
+          await page.screenshot({ path: path.join(SHOTS_DIR, shotName) });
           shotRel = `screenshots/${siteKey}/${shotName}`;
         } catch { /* no crítico */ }
 
