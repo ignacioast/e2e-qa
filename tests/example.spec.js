@@ -56,7 +56,7 @@ const slugify = (url) => {
 
 // Hace scroll real por toda la página (para cargar contenido lazy, formularios,
 // imágenes y demás que solo aparecen al hacer scroll), como haría un usuario.
-async function scrollThroughPage(page) {
+async function scrollThroughPage(page, hoverMenu) {
   const dims = await page.evaluate(() => ({ height: document.body.scrollHeight, vh: window.innerHeight }));
   const total = Math.max(dims.height - dims.vh, 0);
   const step = Math.max(400, Math.floor(total / 12));
@@ -66,10 +66,12 @@ async function scrollThroughPage(page) {
   }
   await page.evaluate((_total) => window.scrollTo(0, _total), total);
   await page.waitForTimeout(400);
-  // Hover sobre los enlaces del menú para revelar submenús desplegables
-  const navLinks = await page.locator('nav a, header a, .menu a').all().catch(() => []);
-  for (const link of navLinks.slice(0, 10)) {
-    try { await link.hover().catch(() => {}); await page.waitForTimeout(150); } catch { /* ignorar */ }
+  // Hover sobre los enlaces del menú para revelar submenús desplegables (solo página base)
+  if (hoverMenu) {
+    const navLinks = await page.locator('nav a, header a, .menu a').all().catch(() => []);
+    for (const link of navLinks.slice(0, 10)) {
+      try { await link.hover().catch(() => {}); await page.waitForTimeout(150); } catch { /* ignorar */ }
+    }
   }
   await page.evaluate(() => window.scrollTo(0, 0));
 }
@@ -131,7 +133,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       });
 
       // Audita UNA página de forma profunda
-      async function auditPage(url, label) {
+      async function auditPage(url, label, hoverMenu) {
         const normalized = normalizeUrl(url) || url;
         const issues = [];
         const consoleErrors = [];
@@ -191,7 +193,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         // --- SCROLL REAL POR LA PÁGINA (carga lazy: forms, imágenes, submenús) ---
         console.log(`  [Scroll]  Recorriendo la página completa...`);
         const scrollStart = Date.now();
-        await scrollThroughPage(page);
+        await scrollThroughPage(page, hoverMenu);
         console.log(`  [Scroll]  ${Date.now() - scrollStart} ms de scroll autónomo`);
 
         // --- CHECKS DE CALIDAD HTML ---
@@ -241,7 +243,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       }
 
       // --- PASO 1: Página base ---
-      await auditPage(urlBase, 'Página base');
+      await auditPage(urlBase, 'Página base', true);
 
       // --- PASO 2: TODOS los enlaces internos (sin límite, sin círculos) ---
       // El sitio responde a veces una versión reducida (anti-bot) sin enlaces:
@@ -261,7 +263,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       for (const link of navLinks) {
         if (visitedPages.has(link.normalized)) continue;
         visitedPages.add(link.normalized);
-        await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`);
+        await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`, false);
       }
 
       // --- GUARDAR REPORTE JSON (por sitio) ---
