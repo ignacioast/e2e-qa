@@ -227,10 +227,14 @@ function esc(s) {
 /* ---------- JMeter ---------- */
 function renderJmeter(jmeter) {
   const box = $('#jmeter');
+  const section = $('#jmeterSection');
   if (isEmpty(jmeter)) {
-    box.innerHTML = '<div class="empty">No hay reporte de Test para este sitio. Ejecuta primero: npm run test:stress</div>';
+    // Sin datos JMeter: ocultar toda la sección (solo aplica a sitios con estrés).
+    section.hidden = true;
+    box.innerHTML = '';
     return;
   }
+  section.hidden = false;
 
   const pct = jmeter.porcentajeError ?? 0;
   let html = '<div class="jmeter-grid">' +

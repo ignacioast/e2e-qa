@@ -98,12 +98,17 @@ function loadSites() {
 }
 
 // Reporte de un sitio, con fallback al archivo legacy (mono-sitio) si aplica.
+// El fallback solo corresponde al sitio original del plan JMeter (ast): los
+// sitios sin estrés no deben heredar datos de otros dominios.
+const JMETER_LEGACY_SITE = 'ast';
 function readSiteReport(subdir, key) {
   const perSite = readJson(path.join(REPORTS_DIR, subdir, `${key}.json`));
   if (perSite) return perSite;
   // Migración: reportes antiguos en reports/auditoria.json y jmeter_resumen.json
-  const legacy = readJson(path.join(REPORTS_DIR, subdir === 'auditoria' ? 'auditoria.json' : 'jmeter_resumen.json'));
-  return legacy || null;
+  const legacyName = subdir === 'auditoria' ? 'auditoria.json' : 'jmeter_resumen.json';
+  const legacy = readJson(path.join(REPORTS_DIR, legacyName));
+  if (legacy && (subdir === 'auditoria' || key === JMETER_LEGACY_SITE)) return legacy;
+  return null;
 }
 
 function reportMap(subdir) {
