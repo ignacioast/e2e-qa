@@ -2,6 +2,7 @@
 <html lang="es">
 
 <head>
+  <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>E2E QA - Panel de Auditoría</title>
@@ -42,6 +43,19 @@
       </div>
       <form id="addSiteForm" class="add-site-form">
         <input id="siteUrl" class="input" type="url" placeholder="https://ejemplo.cl" required>
+
+        <label class="auth-toggle">
+          <input type="checkbox" id="authToggle">
+          <span class="auth-toggle-label">¿Requiere autenticación?</span>
+        </label>
+
+        <div id="authFields" class="auth-fields" hidden>
+          <input id="authLoginUrl" class="input" type="url"
+                 placeholder="Endpoint de Login (ej. https://ejemplo.cl/api/login)">
+          <input id="authUser" class="input" type="text" placeholder="Usuario / Email" autocomplete="off">
+          <input id="authPass" class="input" type="password" placeholder="Contraseña" autocomplete="new-password">
+        </div>
+
         <button class="btn" type="submit">Agregar sitio</button>
       </form>
       <p id="addSiteMsg" class="form-msg" hidden></p>

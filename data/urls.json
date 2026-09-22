@@ -1,3 +1,17 @@
 [
-  "https://ast.cl"
+  {
+    "url": "https://ast.cl",
+    "auth": {
+      "enabled": false
+    }
+  },
+  {
+    "url": "https://hub.wisensor.cl",
+    "auth": {
+      "enabled": true,
+      "loginUrl": "https://hub.wisensor.cl/api/auth/callback/credentials",
+      "username": "iperez@ast.cl",
+      "password": "AstIdi2026"
+    }
+  }
 ]

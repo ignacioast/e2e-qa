@@ -16,7 +16,7 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { siteKey, siteLabel } = require('./site.js');
+const { siteKey, siteLabel, normalizeUrlEntry } = require('./site.js');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const REPORTS_DIR = path.join(PROJECT_ROOT, 'reports');
@@ -86,11 +86,15 @@ function writeUrls(urls) {
 
 // ---- Sitios (data/urls.json) ----
 function loadSites() {
-  return readUrls().map((url) => ({
-    url,
-    key: siteKey(url),
-    dominio: siteLabel(url),
-  }));
+  return readUrls()
+    .map((entry) => normalizeUrlEntry(entry))
+    .filter(Boolean)
+    .map(({ url, auth }) => ({
+      url,
+      key: siteKey(url),
+      dominio: siteLabel(url),
+      auth,
+    }));
 }
 
 // Reporte de un sitio, con fallback al archivo legacy (mono-sitio) si aplica.
@@ -111,6 +115,7 @@ function reportMap(subdir) {
 }
 
 // Agrega una URL nueva a data/urls.json (validada y sin duplicados).
+// Soporta credenciales opcionales: { url, auth: { enabled, loginUrl, username, password } }
 function handleAddSite(req, res) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
@@ -132,10 +137,26 @@ function handleAddSite(req, res) {
 
       const normalized = parsed.href.replace(/\/$/, '');
       const urls = readUrls();
-      const exists = urls.some((u) => u.replace(/\/$/, '').toLowerCase() === normalized.toLowerCase());
+      const exists = urls
+        .map((u) => (typeof u === 'string' ? u : u.url))
+        .some((u) => u.replace(/\/$/, '').toLowerCase() === normalized.toLowerCase());
       if (exists) throw new Error('Ese sitio ya está agregado.');
 
-      urls.push(normalized);
+      // Credenciales opcionales (login por API estilo Postman)
+      const auth = payload.auth && payload.auth.enabled
+        ? {
+            enabled: true,
+            loginUrl: (payload.auth.loginUrl || '').trim(),
+            username: (payload.auth.username || '').trim(),
+            password: (payload.auth.password || '').trim(),
+          }
+        : { enabled: false };
+      if (auth.enabled) {
+        if (!auth.loginUrl) throw new Error('Falta el Endpoint de Login.');
+        if (!auth.username || !auth.password) throw new Error('Usuario y contraseña son obligatorios si el sitio requiere autenticación.');
+      }
+
+      urls.push({ url: normalized, auth });
       writeUrls(urls);
       sendJson(res, { ok: true, sites: loadSites() });
     } catch (err) {

@@ -26,4 +26,23 @@ function siteLabel(url) {
   return host.toLowerCase();
 }
 
-module.exports = { siteKey, siteLabel };
+// data/urls.json admite dos formatos:
+//   "https://sitio.cl"                      (legacy, sin auth)
+//   { url: "https://sitio.cl", auth: {...} } (con credenciales opcionales)
+// Este normalizador convierte cualquier entrada en { url, auth }.
+function normalizeUrlEntry(entry) {
+  if (typeof entry === 'string') return { url: entry, auth: null };
+  if (entry && typeof entry.url === 'string') {
+    const auth = entry.auth && typeof entry.auth === 'object' ? entry.auth : null;
+    return { url: entry.url, auth };
+  }
+  return null;
+}
+
+// Indica si una entrada tiene autenticación habilitada (login por API).
+function authEnabled(entry) {
+  const norm = normalizeUrlEntry(entry);
+  return !!(norm && norm.auth && norm.auth.enabled);
+}
+
+module.exports = { siteKey, siteLabel, normalizeUrlEntry, authEnabled };

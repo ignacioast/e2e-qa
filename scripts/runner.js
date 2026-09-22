@@ -381,7 +381,7 @@ async function main() {
   if (runSite) {
     const urlsPath = path.join(PROJECT_ROOT, 'data', 'urls.json');
     const urls = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'));
-    const known = new Set(urls.map((u) => siteKey(u)));
+    const known = new Set(urls.map((u) => siteKey((typeof u === 'string' ? u : u.url))));
     if (!known.has(runSite)) {
       console.error(`[Runner] ERROR: el sitio "${runSite}" no está en data/urls.json.`);
       console.error(`Sitios conocidos: ${[...known].join(', ')}`);

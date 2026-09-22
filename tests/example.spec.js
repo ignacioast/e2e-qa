@@ -2,15 +2,22 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import site from '../scripts/site.js';
+import { normalizeUrlEntry, authEnabled } from '../scripts/site.js';
+import { apiLogin } from '../scripts/auth.js';
 
-// Carga las URLs dinámicas provistas por el equipo de I+D+i (data/urls.json)
+// Carga las URLs dinámicas provistas por el equipo de I+D+i (data/urls.json).
+// Cada entrada puede ser "https://sitio.cl" (sin login) o
+// { url: "https://sitio.cl", auth: { enabled, loginUrl, username, password } }.
+// La autenticación se resuelve por API (estilo Postman) antes de navegar.
 const urlsPath = path.resolve(__dirname, '..', 'data', 'urls.json');
-const allUrls = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'));
+const allEntries = JSON.parse(fs.readFileSync(urlsPath, 'utf-8'))
+  .map((entry) => normalizeUrlEntry(entry))
+  .filter(Boolean);
 // TEST_SITE=<siteKey> : limita la suite a un solo sitio (ej. runner --site=ast).
 const filterSite = process.env.TEST_SITE;
-const targetUrls = filterSite
-  ? allUrls.filter((u) => site.siteKey(u) === filterSite)
-  : allUrls;
+const targetEntries = filterSite
+  ? allEntries.filter(({ url }) => site.siteKey(url) === filterSite)
+  : allEntries;
 
 // Reportes y screenshots (por sitio: cada dominio escribe en su propia carpeta)
 const REPORTS_DIR = path.resolve(__dirname, '..', 'reports');
@@ -107,11 +114,22 @@ async function collectNavLinks(page, baseDomain) {
 test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright Engine', () => {
   test.setTimeout(600000);
 
-  targetUrls.forEach((urlBase) => {
-    test(`Análisis de cobertura funcional, memoria y caché en: ${urlBase}`, async ({ page }) => {
+  targetEntries.forEach((entry) => {
+    const urlBase = entry.url;
+    test(`Análisis de cobertura funcional, memoria y caché en: ${urlBase}`, async ({ page, context }) => {
       const siteKey = site.siteKey(urlBase);
       const SHOTS_DIR = path.join(SHOTS_BASE, siteKey);
       const ERRORS_SHOTS_DIR = path.join(SHOTS_DIR, 'errors');
+
+      const needsAuth = authEnabled(entry);
+
+      // Autenticación estilo Postman: login por API directa ANTES de navegar.
+      // Guardamos cookies/tokens en el contexto del navegador para que el
+      // page.goto() inicial ya viaje con sesión iniciada. Soporta NextAuth
+      // (CSRF + form-encoded) y loguea status/body si falla.
+      if (needsAuth) {
+        await apiLogin(page, context, entry);
+      }
 
       const baseKey = normalizeUrl(urlBase);
       const visitedPages = new Set([baseKey]);

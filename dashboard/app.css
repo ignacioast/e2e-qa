@@ -123,9 +123,51 @@ body {
 /* ---------- Agregar sitio ---------- */
 .add-site-form { display: flex; gap: 10px; flex-wrap: wrap; }
 .add-site-form .input { flex: 1; min-width: 240px; }
+
+/* Switch "¿Requiere autenticación?" */
+.auth-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted, #64748b);
+  cursor: pointer;
+  user-select: none;
+}
+.auth-toggle input { width: 16px; height: 16px; accent-color: var(--accent, #0a66c2); cursor: pointer; }
+.auth-toggle-label { font-weight: 500; }
+
+/* Campos de credenciales (login por API estilo Postman) */
+.auth-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 2px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.auth-fields[hidden] { display: none; }
+.auth-fields .input { width: 100%; min-width: 0; }
+
 .form-msg { margin-top: 12px; font-size: 13px; }
 .form-msg.ok { color: var(--ok); }
 .form-msg.bad { color: var(--bad); }
+
+/* Badge de autenticación en la tarjeta de sitio */
+.auth-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--accent, #0a66c2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
 
 /* ---------- Layout ---------- */
 main { max-width: 1240px; margin: 22px auto; padding: 0 24px; }

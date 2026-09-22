@@ -75,7 +75,7 @@ function renderHome() {
       cells.push('<div class="cell"><span class="cell-label">OK</span><span class="cell-value ok">' + a.ok + '</span></div>');
       cells.push('<div class="cell"><span class="cell-label">Fallidas</span><span class="cell-value ' + (a.fallidas > 0 ? 'bad' : '') + '">' + a.fallidas + '</span></div>');
     } else if (hasJmeter) {
-      cells.push('<div class="cell"><span class="cell-label">Solo estrés</span><span class="cell-value muted">sin auditoría</span></div>');
+      cells.push('<div class="cell"><span class="cell-label">Solo Test</span><span class="cell-value muted">sin auditoría</span></div>');
     } else {
       cells.push('<div class="cell"><span class="cell-label">Estado</span><span class="cell-value bad">sin datos</span></div>');
     }
@@ -91,10 +91,12 @@ function renderHome() {
 
     const runBtn = state.run && state.run.running && state.run.site === site.key
       ? '<button class="btn btn-ghost btn-sm" disabled>Ejecutando…</button>'
-      : '<button class="btn btn-ghost btn-sm" data-run="' + esc(site.key) + '">Ejecutar estrés</button>';
+      : '<button class="btn btn-ghost btn-sm" data-run="' + esc(site.key) + '">Ejecutar Test</button>';
 
     return '<div class="site-card" data-site="' + esc(site.key) + '">' +
-      '<div class="site-title"><span class="site-dot"></span>' + esc(site.dominio) + '</div>' +
+      '<div class="site-title"><span class="site-dot"></span>' + esc(site.dominio) +
+      (site.auth && site.auth.enabled ? '<span class="auth-badge" title="Inicia sesión por API antes de auditar">auth</span>' : '') +
+      '</div>' +
       '<div class="site-url">' + esc(site.url) + '</div>' +
       '<div class="site-cells">' + cells.join('') + '</div>' +
       stampHtml +
@@ -163,7 +165,7 @@ function renderKPIs(audit, jmeter) {
     cards.push(kpi('Errores', jmeter.errores + ' (' + pct + '%)', pct > 0 ? 'hay fallos' : 'sin fallos', pct > 0 ? 'warn' : 'ok'));
     cards.push(kpi('Latencia avg', jmeter.latenciaPromedioMs + ' ms', 'máx ' + jmeter.latenciaMaximaMs + ' ms'));
   } else {
-    cards.push(kpi('Estrés', '—', 'corre primero npm run test:stress', 'muted'));
+    cards.push(kpi('Test', '—', 'corre primero npm run test:stress', 'muted'));
   }
 
   box.innerHTML = cards.join('');
@@ -226,7 +228,7 @@ function esc(s) {
 function renderJmeter(jmeter) {
   const box = $('#jmeter');
   if (isEmpty(jmeter)) {
-    box.innerHTML = '<div class="empty">No hay reporte de estrés para este sitio. Ejecuta primero: npm run test:stress</div>';
+    box.innerHTML = '<div class="empty">No hay reporte de Test para este sitio. Ejecuta primero: npm run test:stress</div>';
     return;
   }
 
@@ -277,7 +279,7 @@ function closeLightbox() {
   $('#lightbox img').src = '';
 }
 
-/* ---------- Ejecución de estrés por sitio ---------- */
+/* ---------- Ejecución de Test por sitio ---------- */
 let runTimer = null;
 
 async function runSite(key) {
@@ -285,7 +287,7 @@ async function runSite(key) {
   const msg = $('#runStatus');
   msg.hidden = false;
   msg.className = 'run-status running';
-  msg.textContent = 'Ejecutando estrés para ' + (state.sites.find((s) => s.key === key)?.dominio || key) + '…';
+  msg.textContent = 'Ejecutando Test para ' + (state.sites.find((s) => s.key === key)?.dominio || key) + '…';
 
   try {
     const res = await fetch('/api/run/start/' + encodeURIComponent(key), { method: 'POST' });
@@ -340,7 +342,7 @@ $('#siteSelect').addEventListener('change', (e) => {
   if (e.target.value) location.search = '?site=' + encodeURIComponent(e.target.value);
 });
 
-// Botones "Ejecutar estrés" de las tarjetas (delegado)
+// Botones "Ejecutar Test" de las tarjetas (delegado)
 document.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-run]');
   if (btn) {
@@ -359,17 +361,35 @@ $('#lbClose').addEventListener('click', closeLightbox);
 $('#lightbox').addEventListener('click', (e) => { if (e.target === $('#lightbox')) closeLightbox(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
 
-// Agregar un sitio desde el dashboard (se guarda en data/urls.json)
+// Switch "¿Requiere autenticación?": muestra/oculta los campos de credenciales.
+$('#authToggle').addEventListener('change', (e) => {
+  $('#authFields').hidden = !e.target.checked;
+});
+
+// Agregar un sitio desde el dashboard (se guarda en data/urls.json).
+// Si "¿Requiere autenticación?" está activo, se guardan credenciales opcionales.
 $('#addSiteForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const input = $('#siteUrl');
   const msg = $('#addSiteMsg');
   msg.hidden = true;
+
+  const authEnabled = $('#authToggle').checked;
+  const payload = { url: input.value };
+  if (authEnabled) {
+    payload.auth = {
+      enabled: true,
+      loginUrl: $('#authLoginUrl').value.trim(),
+      username: $('#authUser').value.trim(),
+      password: $('#authPass').value,
+    };
+  }
+
   try {
     const res = await fetch('/api/sites', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: input.value }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -382,6 +402,11 @@ $('#addSiteForm').addEventListener('submit', async (e) => {
     msg.className = 'form-msg ok';
     msg.hidden = false;
     input.value = '';
+    $('#authLoginUrl').value = '';
+    $('#authUser').value = '';
+    $('#authPass').value = '';
+    $('#authToggle').checked = false;
+    $('#authFields').hidden = true;
     await load();
   } catch {
     msg.textContent = 'Error de conexión.';
