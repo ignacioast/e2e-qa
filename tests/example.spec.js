@@ -241,6 +241,16 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       const visitedPages = new Set([baseKey]);
       const auditResults = [];
       const cacheHeaders = {};
+      // Errores de consola a nivel SITIO, deduplicados por mensaje (no se repiten
+      // por página): mensaje -> Set(URLs donde apareció).
+      const siteConsoleErrors = new Map();
+      const registerConsoleErrors = (url, consoleErrors) => {
+        for (const msg of consoleErrors) {
+          if (!msg || !msg.trim()) continue;
+          if (!siteConsoleErrors.has(msg)) siteConsoleErrors.set(msg, new Set());
+          siteConsoleErrors.get(msg).add(url);
+        }
+      };
 
       resetShotsDirs(SHOTS_DIR);
 
@@ -266,7 +276,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         page.on('pageerror', (err) => consoleErrors.push(`[JS] ${err.message}`));
         page.on('console', (msg) => {
           if (msg.type() === 'error') {
-            consoleErrors.push(`[Console] ${msg.text().slice(0, 200)}`);
+            consoleErrors.push(`[Console] ${msg.text().trim()}`);
           }
         });
 
@@ -343,7 +353,9 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
           shotRel = `screenshots/${siteKey}/${shotName}`;
         } catch { /* no crítico */ }
 
-        const pageIssues = [...issues, ...consoleErrors.slice(0, 5)];
+        const pageIssues = [...issues];
+        const consoleErrorsUnique = [...new Set(consoleErrors)];
+        registerConsoleErrors(url, consoleErrorsUnique);
         if (failedRequests.length) pageIssues.push(`${failedRequests.length} respuestas 4xx/5xx`);
 
         // LOG LEGIBLE
@@ -420,6 +432,12 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         ok: auditResults.filter((r) => r.status === 'OK').length,
         fallidas: auditResults.filter((r) => r.status === 'FALLÓ').length,
         paginas: auditResults,
+        // Errores de consola únicos por mensaje, con las páginas donde aparecen
+        // (deduplicados a nivel sitio: un { mensaje, paginas: [...] } por mensaje).
+        erroresConsola: [...siteConsoleErrors.entries()].map(([mensaje, paginas]) => ({
+          mensaje,
+          paginas: [...paginas],
+        })),
       }, null, 2));
 
       // --- RESUMEN FINAL ---

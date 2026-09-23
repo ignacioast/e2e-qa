@@ -158,6 +158,7 @@ function renderDetail(key) {
   const search = $('#search');
   const filter = $('#filterStatus');
   renderAudit(audit, search.value.trim(), filter.value);
+  renderConsoleErrors(audit);
   renderJmeter(jmeter);
 }
 
@@ -219,12 +220,13 @@ function renderAudit(audit, search, statusFilter) {
     .filter((p) => statusFilter === 'all' || p.status === statusFilter)
     .map((p) => {
       const cls = p.status === 'OK' ? 'ok' : 'bad';
+      // Los errores de consola se muestran en su propia sección dedicada (por tipo y
+      // deduplicados a nivel sitio), no en Observaciones de cada fila.
       const issues = (p.issues && p.issues.length)
-        ? p.issues.map((i) => {
-            // Console errors / excepciones JS en rojo; el resto (dominio, acceso, etc.) en naranjo.
-            const isJsError = /^\[(Console|JS)\]/.test(i);
-            return '<div class="' + (isJsError ? 'issue-js' : '') + '">' + esc(i) + '</div>';
-          }).join('')
+        ? p.issues
+            .filter((i) => !/^\[(Console|JS)\]/.test(i))
+            .map((i) => '<div>' + esc(i) + '</div>')
+            .join('')
         : '<span class="nobadge">—</span>';
       const shot = p.screenshot
         ? '<img class="thumb" src="/' + esc(p.screenshot) + '" loading="lazy" onclick="openLightbox(\'/' + esc(p.screenshot) + '\')">'
@@ -249,6 +251,60 @@ function formsCell(p) {
   const n = p.forms;
   if (!n || n === 0) return '<span class="muted">—</span>';
   return String(n) + '<div class="muted" style="font-size:11px">' + (p.inputs || 0) + ' campos</div>';
+}
+
+/* ---------- Errores de consola (deduplicados a nivel sitio) ---------- */
+// Fallback: los reportes generados antes de era "erroresConsola" tenían los
+// console errors metidos en "issues" de cada página. Los extraemos de ahí,
+// normalizamos y agrupamos igual, para que la sección funcione en ambos casos.
+const normalizeConsoleMsg = (msg) => msg.replace(/\s+/g, ' ').trim();
+
+function collectConsoleErrors(audit) {
+  const grouped = new Map(); // mensaje -> Set(urls)
+
+  if (audit && Array.isArray(audit.erroresConsola) && audit.erroresConsola.length) {
+    for (const entry of audit.erroresConsola) {
+      const key = normalizeConsoleMsg(entry.mensaje);
+      if (!grouped.has(key)) grouped.set(key, new Set());
+      (entry.paginas || []).forEach((u) => grouped.get(key).add(u));
+    }
+    return [...grouped.entries()].map(([msg, urls]) => ({ mensaje: msg, paginas: [...urls] }));
+  }
+
+  if (audit && Array.isArray(audit.paginas)) {
+    for (const p of audit.paginas) {
+      if (!Array.isArray(p.issues)) continue;
+      for (const i of p.issues) {
+        if (!/^\[(Console|JS)\]/.test(i)) continue;
+        const key = normalizeConsoleMsg(i);
+        if (!grouped.has(key)) grouped.set(key, new Set());
+        grouped.get(key).add(p.url);
+      }
+    }
+  }
+  return [...grouped.entries()].map(([msg, urls]) => ({ mensaje: msg, paginas: [...urls] }));
+}
+
+function renderConsoleErrors(audit) {
+  const section = $('#consolePanel');
+  if (!section) return;
+  const errs = collectConsoleErrors(audit);
+  if (!errs.length) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  $('#consoleCount').textContent = String(errs.length);
+
+  $('#consoleList').innerHTML = errs.map((e) =>
+    '<div class="console-err">' +
+      '<div class="console-msg">' + esc(e.mensaje) + '</div>' +
+      '<div class="console-meta">en ' + e.paginas.length +
+        (e.paginas.length === 1 ? ' página' : ' páginas') +
+        '<span class="console-urls"> · ' + e.paginas.map(esc).join(' · ') + '</span>' +
+      '</div>' +
+    '</div>'
+  ).join('');
 }
 
 function esc(s) {
