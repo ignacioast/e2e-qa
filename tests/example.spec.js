@@ -75,7 +75,7 @@ async function scrollThroughPage(page, hoverMenu) {
   await page.waitForTimeout(400);
   // Hover sobre los enlaces del menú para revelar submenús desplegables (solo página base)
   if (hoverMenu) {
-    const navLinks = await page.locator('nav a, header a, .menu a').all().catch(() => []);
+    const navLinks = await page.locator('nav a, header a, .menu a, aside a, aside [role="menuitem"], .sidebar a').all().catch(() => []);
     for (const link of navLinks.slice(0, 10)) {
       try { await link.hover().catch(() => {}); await page.waitForTimeout(150); } catch { /* ignorar */ }
     }
@@ -83,25 +83,39 @@ async function scrollThroughPage(page, hoverMenu) {
   await page.evaluate(() => window.scrollTo(0, 0));
 }
 
-// Extrae enlaces únicos internos del mismo dominio desde toda la página (sin recursión)
+// Extrae enlaces únicos internos del mismo dominio desde toda la página (sin recursión).
+// Soporta hash-routing (SPAs tipo "#/ruta" o "/#/ruta"): un ancla pura "#contacto" no
+// se cuenta como página, pero "#/akva" sí se audita como ruta propia.
 async function collectNavLinks(page, baseDomain) {
   const seen = new Set();
   const links = [];
 
-  const anchors = await page.locator('a').all().catch(() => []);
+  // Anchors de TODO el documento + los del menú/sidebar (los <a> del nav ya están
+  // incluidos en 'a', pero lo dejamos explícito por si hay iframes o shadow DOM).
+  const anchors = await page.locator('a, aside a, nav a, header a, .sidebar a').all().catch(() => []);
+  if (anchors.length === 0) return links; // ningún <a> en todo el documento: sin enlaces
 
   for (const anchor of anchors) {
     const href = await anchor.getAttribute('href').catch(() => null);
-    if (!href || href.trim() === '' || href === '#') continue;
+    if (!href) continue;
+    const raw = href.trim();
+    if (raw === '' || raw === '#' || raw === 'javascript:void(0)' || raw === 'javascript:void(0);') continue;
+
+    // Anclas puras (#seccion) no son subpáginas; rutas con hash (#/ruta) sí.
+    const isHashRoute = /^#\/|^#!\/|^\/#\//.test(raw);
+    if (raw.startsWith('#') && !isHashRoute) continue;
 
     try {
-      const absoluteUrl = new URL(href, page.url()).href;
-      const normalized = normalizeUrl(absoluteUrl);
+      const absoluteUrl = new URL(raw, page.url()).href;
+      // Un ancla de sección sobre una ruta real (ej: /akva#equipo) audita la ruta sin el hash.
+      const isRouteHash = absoluteUrl.includes('#') && absoluteUrl.split('#')[1].startsWith('/');
+      const targetUrl = isRouteHash ? absoluteUrl : absoluteUrl.split('#')[0];
+      const normalized = normalizeUrl(targetUrl);
 
-      if (normalized && absoluteUrl.includes(baseDomain) && !absoluteUrl.includes('#')) {
+      if (normalized && targetUrl.includes(baseDomain)) {
         if (!seen.has(normalized)) {
           seen.add(normalized);
-          links.push({ url: absoluteUrl, normalized });
+          links.push({ url: targetUrl, normalized });
         }
       }
     } catch {
@@ -109,6 +123,88 @@ async function collectNavLinks(page, baseDomain) {
     }
   }
   return links;
+}
+
+// Descubrimiento por clic para SPAs con routing por JS (React/Vue/Angular) donde el
+// menú navega por onClick sobre divs/spans (sin <a href> ni <button>, a veces sin
+// <nav>/<aside>). Hace click en cada candidato y captura la URL resultante.
+// IMPORTANTE: es best-effort y acotado de forma garantizada: `Promise.race` limita la
+// función completa a ~15 s aunque algo se cuelgue (ej: 10.30.7.14, un radar sin
+// subpáginas). Si no hay candidatos o no se detecta navegación real, retorna [] y el
+// test continúa auditando solo la página base.
+async function collectViaMenuClicks(page, baseUrl, baseDomain) {
+  const HARD_LIMIT_MS = 15000;
+
+  const crawl = async () => {
+    const found = new Map();
+    const origin = new URL(baseUrl).origin;
+    const baseNorm = normalizeUrl(baseUrl);
+    const DEADLINE_MS = 14000;
+    const deadline = Date.now() + DEADLINE_MS;
+
+    // Localizar candidatos clicables de la zona de menú (mitad izquierda de la pantalla)
+    const candidates = await page.evaluate(() => {
+      const items = [];
+      const seen = new Set();
+      const all = document.querySelectorAll('body *');
+      for (const el of all) {
+        const tag = el.tagName.toLowerCase();
+        if (['input', 'select', 'textarea', 'script', 'style', 'svg', 'path', 'label', 'img', 'iframe'].includes(tag)) continue;
+        if (getComputedStyle(el).cursor !== 'pointer') continue;
+        const text = (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+        if (!text || text.length > 60 || text.length < 2) continue;
+        if (seen.has(text)) continue;
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        if (r.left > window.innerWidth * 0.55) continue; // menú lateral suele estar a la izquierda
+        const href = el.getAttribute('href');
+        if (href && href !== '#') continue; // los <a> reales ya los cubre collectNavLinks
+        seen.add(text);
+        items.push({ text, tag, x: Math.round(r.left), y: Math.round(r.top) });
+      }
+      return items.slice(0, 6);
+    }).catch(() => []);
+
+    if (candidates.length === 0) {
+      console.log('[Crawler] Sin candidatos clicables en el menú — solo se audita la página base.');
+      return [];
+    }
+    console.log(`[Crawler] Probando ${candidates.length} elemento(s) clicables (hasta ${Math.round(DEADLINE_MS / 1000)} s)...`);
+
+    for (const cand of candidates) {
+      if (found.size >= 20 || Date.now() > deadline) break;
+      if (/login|logout|ingresar|salir|cerrar sesión/i.test(cand.text)) continue;
+      // Estado limpio: cada intento parte de la página base (con timeout, nunca cuelga).
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(400);
+
+      const target = page.locator('body').getByText(cand.text, { exact: false }).first();
+      try {
+        await target.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(900);
+        const after = page.url();
+        const afterNorm = normalizeUrl(after);
+        const isNewPage = afterNorm && afterNorm !== baseNorm && after.startsWith(origin) && !found.has(afterNorm);
+        if (isNewPage) {
+          found.set(afterNorm, after);
+          console.log(`[Crawler] 💠 Click "${cand.text}" → ${after}`);
+          // Navegación real encontrada: no gastar el resto del deadline en los demás clics.
+          return [...found.entries()].map(([normalized, url]) => ({ url, normalized }));
+        }
+        console.log(`[Crawler]   click "${cand.text}" sin cambio de ruta`);
+      } catch { /* elemento no clickeable */ }
+    }
+
+    return [...found.entries()].map(([normalized, url]) => ({ url, normalized }));
+  };
+
+  return Promise.race([
+    crawl(),
+    new Promise((resolve) => setTimeout(() => {
+      console.log('[Crawler] Timeout global de clics alcanzado — se audita solo la página base.');
+      resolve([]);
+    }, HARD_LIMIT_MS)),
+  ]);
 }
 
 test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright Engine', () => {
@@ -128,7 +224,17 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       // page.goto() inicial ya viaje con sesión iniciada. Soporta NextAuth
       // (CSRF + form-encoded) y loguea status/body si falla.
       if (needsAuth) {
-        await apiLogin(page, context, entry);
+        const loginResult = await apiLogin(page, context, entry);
+        // SPAs con auth por TOKEN (localStorage) deciden mostrar el sidebar según
+        // el localStorage: recargar la app solo si apiLogin confirmó que guardó un
+        // token. Para auth por cookies (NextAuth, hub.wisensor) NO recargamos:
+        // la sesión ya viaja en el contexto y un reload extra solo agrega riesgo
+        // de Cloudflare/latencia.
+        if (loginResult && loginResult.tokenSaved) {
+          await page.goto(urlBase, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {});
+          await page.waitForTimeout(2500);
+          console.log(`[Auth] App base recargada tras login (token guardado): ${page.url()}`);
+        }
       }
 
       const baseKey = normalizeUrl(urlBase);
@@ -267,16 +373,37 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       // El sitio responde a veces una versión reducida (anti-bot) sin enlaces:
       // si no detectamos nada, esperamos y reintentamos antes de rendirnos.
       let navLinks = [];
-      for (let attempt = 1; attempt <= 3 && !navLinks.length; attempt++) {
+      for (let attempt = 1; attempt <= 2 && !navLinks.length; attempt++) {
         navLinks = await collectNavLinks(page, baseDomain);
-        if (!navLinks.length && attempt < 3) {
-          console.log(`[Crawler] 0 enlaces detectados (posible respuesta reducida). Reintentando en 2 s... (${attempt}/3)`);
+        if (!navLinks.length && attempt < 2) {
+          console.log(`[Crawler] 0 enlaces detectados (posible respuesta reducida). Reintentando en 2 s... (${attempt}/2)`);
           await page.waitForTimeout(2000);
           await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
           await page.waitForTimeout(1000);
         }
       }
-      console.log(`[Auditoría] ${navLinks.length} enlaces internos detectados. Auditando todos...`);
+
+      // PASO 2.5: SOLO para SPAs donde NO existe ningún <a href> real (p. ej. un
+      // dashboard React que navega por onClick sobre divs). En sitios normales
+      // (ast.cl, hub.wisensor) con enlaces tradicionales este paso se OMITE:
+      // navegar/clickear la web real solo rompía pantallazos y el anti-bot.
+      let clickLinks = [];
+      if (navLinks.length === 0) {
+        clickLinks = await collectViaMenuClicks(page, urlBase, baseDomain);
+      }
+      const merged = new Map();
+      for (const link of navLinks) merged.set(link.normalized, link.url);
+      for (const link of clickLinks) if (!merged.has(link.normalized)) merged.set(link.normalized, link.url);
+      navLinks = [...merged.entries()].map(([normalized, url]) => ({ url, normalized }));
+
+      if (navLinks.length === 0) {
+        console.log('[Crawler] No se encontraron subpáginas (ni enlaces ni clics). Se audita solo la página base.');
+      } else {
+        console.log(`[Auditoría] ${navLinks.length} enlaces internos detectados (${clickLinks.length} por clic). Auditando todos...`);
+      }
+
+      // Devolver el page a la página base antes de auditar las subpáginas.
+      await page.goto(urlBase, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
 
       for (const link of navLinks) {
         if (visitedPages.has(link.normalized)) continue;

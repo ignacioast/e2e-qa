@@ -14,6 +14,21 @@
   --mono: ui-monospace, "Cascadia Code", Consolas, "Segoe UI Mono", monospace;
 }
 
+[data-theme="dark"] {
+  --bg: #11151a;
+  --panel: #171c22;
+  --panel-2: #1d242c;
+  --border: #2a3138;
+  --border-soft: #232a30;
+  --text: #e6eaf0;
+  --muted: #9aa7b8;
+  --accent: #3b82f6;
+  --accent-dark: #2563eb;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --bad: #ef4444;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -66,6 +81,20 @@ body {
   align-items: center;
 }
 .btn-ghost:hover { background: var(--panel-2); border-color: var(--border); }
+/* ---------- Botón de Eliminar (Rojo) ---------- */
+/* ---------- Botón de Eliminar (Ghost Rojo) ---------- */
+.btn-danger {
+  background: transparent;
+  border-color: var(--border); /* Borde gris suave inicial */
+  color: var(--bad);           /* Texto rojo */
+}
+
+.btn-danger:hover {
+  background: var(--bad);      /* Se llena de rojo al pasar el mouse */
+  border-color: var(--bad);
+  color: #fff;                 /* El texto cambia a blanco para que se lea bien */
+}
+
 
 /* ---------- Selector de sitios (vista inicio) ---------- */
 .sites {
@@ -368,3 +397,51 @@ td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font
   cursor: pointer;
 }
 .lb-close:hover { background: rgba(255,255,255,.25); }
+
+
+/* ---------- Modal de Confirmación Estilizado ---------- */
+.c-modal {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+}
+.c-modal[hidden] { display: none; }
+
+.c-modal-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 380px;
+  width: 90%;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  animation: modalScale 0.2s ease-out;
+}
+.c-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--bad); /* Título en rojo de advertencia */
+  margin-bottom: 8px;
+}
+.c-modal-body {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 20px;
+  white-space: pre-line; /* Mantiene los saltos de línea */
+}
+.c-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@keyframes modalScale {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}

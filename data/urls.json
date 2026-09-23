@@ -13,5 +13,38 @@
       "username": "iperez@ast.cl",
       "password": "AstIdi2026"
     }
+  },
+  {
+    "url": "http://10.30.7.14:5173",
+    "auth": {
+      "enabled": false
+    }
+  },
+  {
+    "url": "http://10.30.7.25:5174",
+    "auth": {
+      "enabled": true,
+      "loginUrl": "http://10.30.7.25:5174/api-system/authenticated",
+      "username": "cliente@ast.cl",
+      "password": "astidi2025"
+    }
+  },
+  {
+    "url": "http://10.20.7.81:5173",
+    "auth": {
+      "enabled": true,
+      "loginUrl": "http://10.20.7.81:5173/api/auth/login",
+      "username": "iperez@ast.cl",
+      "password": "iperez"
+    }
+  },
+  {
+    "url": "http://10.30.7.110:5175",
+    "auth": {
+      "enabled": true,
+      "loginUrl": "http://10.30.7.110:5175/api-system/authenticated",
+      "username": "cliente@ast.cl",
+      "password": "astidi2025"
+    }
   }
 ]

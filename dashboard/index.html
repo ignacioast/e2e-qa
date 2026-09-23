@@ -3,6 +3,12 @@
 
 <head>
   <link rel="icon" type="image/png" href="/favicon.png" sizes="32x32">
+  <script>
+    (function () {
+      var t = localStorage.getItem('dashboard_theme') || 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>E2E QA - Panel de Auditoría</title>
@@ -21,6 +27,7 @@
       <span class="stamp" id="stamp">—</span>
       <select id="siteSelect" class="input" hidden aria-label="Seleccionar sitio"></select>
       <a id="backHome" href="/" class="btn btn-ghost" hidden>Ver todos los sitios</a>
+      <button class="btn btn-ghost" id="themeToggle" type="button">Modo oscuro</button>
       <button class="btn" id="refresh" type="button">Recargar</button>
     </div>
   </header>
@@ -70,7 +77,7 @@
 
       <section id="kpis" class="kpis"></section>
 
-      <section class="panel">
+      <section class="panel" id="auditTablePanel">
         <div class="panel-head">
           <h2>Páginas auditadas <span class="muted">(Playwright)</span></h2>
           <div class="controls">
@@ -117,6 +124,17 @@
   <div id="lightbox" class="lightbox" hidden>
     <img src="" alt="Pantallazo">
     <button id="lbClose" class="lb-close" type="button">×</button>
+  </div>
+
+  <div id="confirm-modal" class="c-modal" hidden>
+    <div class="c-modal-box">
+      <h3 class="c-modal-title">¿Eliminar sitio?</h3>
+      <p id="confirm-modal-text" class="c-modal-body"></p>
+      <div class="c-modal-actions">
+        <button id="confirm-cancel" class="btn btn-ghost btn-sm">Cancelar</button>
+        <button id="confirm-accept" class="btn btn-danger btn-sm">Eliminar</button>
+      </div>
+    </div>
   </div>
 
   <script src="/app.js"></script>

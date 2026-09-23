@@ -7,7 +7,20 @@ let state = {
   audit: {},
   jmeter: {},
   currentKey: null,
+  theme: localStorage.getItem('dashboard_theme') || 'light',
 };
+
+function applyTheme(theme) {
+  state.theme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('dashboard_theme', theme);
+  const btn = $('#themeToggle');
+  if (btn) btn.textContent = theme === 'dark' ? 'Modo claro' : 'Modo oscuro';
+}
+
+function toggleTheme() {
+  applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+}
 
 async function fetchJSON(url) {
   try {
@@ -20,6 +33,7 @@ async function fetchJSON(url) {
 }
 
 async function load() {
+  applyTheme(state.theme);
   const [authSites, auditMap, jmeterMap] = await Promise.all([
     fetchJSON('/api/sites'),
     fetchJSON('/api/auditoria'),
@@ -93,6 +107,11 @@ function renderHome() {
       ? '<button class="btn btn-ghost btn-sm" disabled>Ejecutando…</button>'
       : '<button class="btn btn-ghost btn-sm" data-run="' + esc(site.key) + '">Ejecutar Test</button>';
 
+   const deleteBtn = site.key === 'ast'
+      ? ''
+      : '<button class="btn btn-danger btn-sm" onclick="eliminarSitio(event, \'' + esc(site.key) + '\')">Eliminar</button>';
+
+
     return '<div class="site-card" data-site="' + esc(site.key) + '">' +
       '<div class="site-title"><span class="site-dot"></span>' + esc(site.dominio) +
       (site.auth && site.auth.enabled ? '<span class="auth-badge" title="Inicia sesión por API antes de auditar">auth</span>' : '') +
@@ -100,7 +119,7 @@ function renderHome() {
       '<div class="site-url">' + esc(site.url) + '</div>' +
       '<div class="site-cells">' + cells.join('') + '</div>' +
       stampHtml +
-      '<div class="site-actions">' + runBtn + '</div>' +
+      '<div class="site-actions">' + runBtn + ' ' + deleteBtn + '</div>' +
       '</div>';
   }).join('');
 }
@@ -132,7 +151,10 @@ function renderDetail(key) {
     : 'Sin datos de ejecución para este sitio';
 
   renderKPIs(audit, jmeter);
-  $('#notice').hidden = !(isEmpty(audit) || isEmpty(jmeter));
+  // Sin datos (aún no se ejecutó el test de este sitio): mostrar aviso claro.
+  $('#notice').hidden = !(isEmpty(audit) && isEmpty(jmeter));
+  // Si NO hay auditoría, ocultar el título/sección de la tabla para no dejar un panel vacío.
+  $('#auditTablePanel').hidden = isEmpty(audit);
   const search = $('#search');
   const filter = $('#filterStatus');
   renderAudit(audit, search.value.trim(), filter.value);
@@ -149,13 +171,20 @@ function renderKPIs(audit, jmeter) {
   const noJmeter = isEmpty(jmeter);
   const cards = [];
 
+  // Sin NINGÚN dato aún: mensaje claro (no hereda contenido de otros sitios).
+  if (noAudit && noJmeter) {
+    cards.push(kpi('Estado', 'sin datos', 'ejecuta el test para generar el reporte', 'muted'));
+    box.innerHTML = cards.join('');
+    return;
+  }
+
   if (!noAudit) {
     cards.push(kpi('Dominio', audit.dominio || '—', '', 'accent'));
     cards.push(kpi('Páginas', audit.totalPaginas, 'auditadas'));
     cards.push(kpi('OK', audit.ok, 'sin problemas', 'ok'));
     cards.push(kpi('Fallidas', audit.fallidas, audit.fallidas > 0 ? 'revisar' : 'ninguna', audit.fallidas > 0 ? 'bad' : 'ok'));
   } else {
-    cards.push(kpi('Auditoría', '—', 'corre primero npm run test:stress', 'muted'));
+    cards.push(kpi('Auditoría', '—', 'aún no ejecutada', 'muted'));
   }
 
   if (!noJmeter) {
@@ -164,8 +193,8 @@ function renderKPIs(audit, jmeter) {
     const pct = jmeter.porcentajeError ?? 0;
     cards.push(kpi('Errores', jmeter.errores + ' (' + pct + '%)', pct > 0 ? 'hay fallos' : 'sin fallos', pct > 0 ? 'warn' : 'ok'));
     cards.push(kpi('Latencia avg', jmeter.latenciaPromedioMs + ' ms', 'máx ' + jmeter.latenciaMaximaMs + ' ms'));
-  } else {
-    cards.push(kpi('Test', '—', 'corre primero npm run test:stress', 'muted'));
+  } else if (noAudit) {
+    cards.push(kpi('Test', '—', 'aún no ejecutado', 'muted'));
   }
 
   box.innerHTML = cards.join('');
@@ -334,6 +363,7 @@ function pollRun(key) {
 
 /* ---------- Events ---------- */
 $('#refresh').addEventListener('click', load);
+$('#themeToggle').addEventListener('click', toggleTheme);
 $('#search').addEventListener('input', (e) => {
   if (!state.currentKey) return;
   renderAudit(state.audit[state.currentKey], e.target.value.trim(), $('#filterStatus').value);
@@ -345,6 +375,77 @@ $('#filterStatus').addEventListener('change', (e) => {
 $('#siteSelect').addEventListener('change', (e) => {
   if (e.target.value) location.search = '?site=' + encodeURIComponent(e.target.value);
 });
+
+function customConfirm(message) {
+  return new Promise((resolve) => {
+    let modal = document.getElementById('confirm-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'confirm-modal';
+      modal.className = 'c-modal';
+      modal.innerHTML = `
+        <div class="c-modal-box">
+          <h3 class="c-modal-title">¿Eliminar sitio?</h3>
+          <p id="confirm-modal-text" class="c-modal-body"></p>
+          <div class="c-modal-actions">
+            <button id="confirm-cancel" class="btn btn-ghost btn-sm">Cancelar</button>
+            <button id="confirm-accept" class="btn btn-danger btn-sm">Eliminar</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+    const bodyText = document.getElementById('confirm-modal-text');
+    const btnCancel = document.getElementById('confirm-cancel');
+    const btnAccept = document.getElementById('confirm-accept');
+
+    bodyText.textContent = message;
+    modal.style.display = 'flex';
+
+    function close(value) {
+      modal.style.display = 'none';
+      btnCancel.onclick = null;
+      btnAccept.onclick = null;
+      resolve(value);
+    }
+    btnCancel.onclick = () => close(false);
+    btnAccept.onclick = () => close(true);
+  });
+}
+
+// Esta es la función que procesará el borrado directo
+async function eliminarSitio(e, key) {
+  // 1. Bloqueamos cualquier comportamiento del enlace de la tarjeta madre
+  e.preventDefault();
+  e.stopPropagation();
+
+  // 2. Lanzamos el modal
+  const confirmacion = await customConfirm(
+    `¿Eliminar el sitio ${key}?\n\nSe borrarán todos los reportes y pantallazos asociados. Esta acción no se puede deshacer.`
+  );
+
+  if (confirmacion) {
+    fetch('/api/sites/' + encodeURIComponent(key), { method: 'DELETE' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          state.sites = state.sites.filter(s => s.key !== key);
+          state.audit[key] = null;
+          state.jmeter[key] = null;
+          if (state.currentKey === key) {
+            location.search = '';
+            renderHome();
+          } else {
+            load();
+          }
+        } else {
+          alert('Error al eliminar: ' + (data.error || 'desconocido'));
+        }
+      })
+      .catch(() => alert('Error de conexión.'));
+  }
+}
+
 
 // Botones "Ejecutar Test" de las tarjetas (delegado)
 document.addEventListener('click', (e) => {

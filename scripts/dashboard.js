@@ -47,7 +47,15 @@ function sendFile(res, filePath) {
       res.end('Not found');
       return;
     }
-    res.writeHead(200, { 'Content-Type': type });
+    // No store: el dashboard refleja SIEMPRE el contenido actual de reports/,
+    // sin que el navegador sirva copias cacheadas (los reportes cambian tras
+    // cada npm run test:stress).
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Cache-Control': 'no-store',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    });
     res.end(data);
   });
 }
@@ -61,7 +69,12 @@ function readJson(filePath) {
 }
 
 function sendJson(res, data) {
-  res.writeHead(200, { 'Content-Type': CONTENT_TYPES['.json'] });
+  res.writeHead(200, {
+    'Content-Type': CONTENT_TYPES['.json'],
+    'Cache-Control': 'no-store',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -98,23 +111,38 @@ function loadSites() {
 }
 
 // Reporte de un sitio, con fallback al archivo legacy (mono-sitio) si aplica.
-// El fallback solo corresponde al sitio original del plan JMeter (ast): los
-// sitios sin estrés no deben heredar datos de otros dominios.
-const JMETER_LEGACY_SITE = 'ast';
+// El fallback solo corresponde al sitio original del plan (ast): los demás sitios
+// que aún no tienen su propio reporte NO deben heredar datos de ast.cl en el panel.
+const LEGACY_SITE = 'ast';
 function readSiteReport(subdir, key) {
   const perSite = readJson(path.join(REPORTS_DIR, subdir, `${key}.json`));
   if (perSite) return perSite;
   // Migración: reportes antiguos en reports/auditoria.json y jmeter_resumen.json
   const legacyName = subdir === 'auditoria' ? 'auditoria.json' : 'jmeter_resumen.json';
   const legacy = readJson(path.join(REPORTS_DIR, legacyName));
-  if (legacy && (subdir === 'auditoria' || key === JMETER_LEGACY_SITE)) return legacy;
+  if (legacy && key === LEGACY_SITE) return legacy;
   return null;
 }
 
+// Mapea reports/<subdir>/*.json -> { key: reporte }, resolviendo además los
+// reportes generados con una key ANTIGUA del mismo dominio (ej: carpeta
+// "10_20_7" antes del fix IPv4). Así la última ejecución de cada sitio se
+// muestra aunque cambie su siteKey.
 function reportMap(subdir) {
   const map = {};
+  const dir = path.join(REPORTS_DIR, subdir);
+  let legacyFiles = [];
+  let legacyMap = {};
+  try {
+    legacyFiles = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    for (const f of legacyFiles) {
+      const data = readJson(path.join(dir, f));
+      if (data && data.dominio) legacyMap[data.dominio] = data;
+    }
+  } catch { /* directorio aún no existe */ }
+
   for (const site of loadSites()) {
-    map[site.key] = readSiteReport(subdir, site.key);
+    map[site.key] = readSiteReport(subdir, site.key) || legacyMap[site.dominio] || null;
   }
   return map;
 }
@@ -169,6 +197,42 @@ function handleAddSite(req, res) {
       res.end(JSON.stringify({ error: err.message || 'No se pudo agregar el sitio.' }));
     }
   });
+}
+
+// Elimina un sitio completo: entrada en urls.json + reportes + pantallazos.
+// El sitio fijo ast.cl (www.ast.cl) no se puede eliminar.
+function deleteSite(key) {
+  if (!key) return { error: 'Sitio no especificado.' };
+  // Protección contra path traversal: solo claves válidas de siteKey().
+  if (key !== siteKey(key) || key.includes('/') || key.includes('\\') || key.startsWith('.')) {
+    return { error: 'Clave de sitio inválida.' };
+  }
+  if (key === 'ast') {
+    return { error: 'El sitio ast.cl es fijo y no se puede eliminar.' };
+  }
+
+  const urls = readUrls();
+  const before = urls.length;
+  const remaining = urls.filter((u) => {
+    const url = typeof u === 'string' ? u : u.url;
+    return siteKey(url) !== key;
+  });
+  if (remaining.length === before) {
+    return { error: 'El sitio no existe en urls.json.' };
+  }
+  writeUrls(remaining);
+
+  // Borrado de datos asociados: reportes y pantallazos (recursivo, forzado).
+  const paths = [
+    path.join(REPORTS_DIR, 'auditoria', `${key}.json`),
+    path.join(REPORTS_DIR, 'jmeter', `${key}.json`),
+    path.join(REPORTS_DIR, 'screenshots', key),
+  ];
+  for (const p of paths) {
+    try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* ignora */ }
+  }
+
+  return { ok: true, sites: loadSites() };
 }
 
 // Estado de la ejecución de auditorías desde el frontend
@@ -242,6 +306,12 @@ const server = http.createServer((req, res) => {
     }
     return sendJson(res, loadSites());
   }
+  if (urlPath.startsWith('/api/sites/')) {
+    if (req.method === 'DELETE') {
+      const key = urlPath.replace('/api/sites/', '');
+      return sendJson(res, deleteSite(key));
+    }
+  }
   if (urlPath === '/api/auditoria') {
     return sendJson(res, reportMap('auditoria'));
   }
@@ -281,7 +351,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`[Dashboard] Web en http://localhost:${PORT}`);
   if (HOST === '0.0.0.0') {
-    console.log('[Dashboard] Visible en tu red local (LAN). Avisa a tus compañeros con tu IP:');
+    console.log('[Dashboard] Visible en tu red local (LAN).:');
     const nets = require('os').networkInterfaces();
     for (const name of Object.keys(nets)) {
       for (const net of nets[name] || []) {
