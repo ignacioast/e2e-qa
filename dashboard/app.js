@@ -220,7 +220,11 @@ function renderAudit(audit, search, statusFilter) {
     .map((p) => {
       const cls = p.status === 'OK' ? 'ok' : 'bad';
       const issues = (p.issues && p.issues.length)
-        ? p.issues.map((i) => '<div>' + esc(i) + '</div>').join('')
+        ? p.issues.map((i) => {
+            // Console errors / excepciones JS en rojo; el resto (dominio, acceso, etc.) en naranjo.
+            const isJsError = /^\[(Console|JS)\]/.test(i);
+            return '<div class="' + (isJsError ? 'issue-js' : '') + '">' + esc(i) + '</div>';
+          }).join('')
         : '<span class="nobadge">—</span>';
       const shot = p.screenshot
         ? '<img class="thumb" src="/' + esc(p.screenshot) + '" loading="lazy" onclick="openLightbox(\'/' + esc(p.screenshot) + '\')">'

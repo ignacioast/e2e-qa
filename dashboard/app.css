@@ -287,6 +287,7 @@ main { max-width: 1240px; margin: 22px auto; padding: 0 24px; }
 td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font-size: 12px; }
 .issue { color: var(--warn); font-size: 12px; max-width: 260px; }
 .issue .nobadge { opacity: .55; color: var(--muted); }
+.issue .issue-js { color: var(--bad); font-weight: 600; }
 
 .thumb {
   width: 150px;
