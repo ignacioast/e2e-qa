@@ -307,8 +307,11 @@ async function analyzeJtl() {
  * En CI (GitHub Actions) se omite para no colgar/abrir navegador sin sentido.
  */
 async function openDashboard(runSite) {
-  if (process.env.CI) {
-    console.log('[Runner] Entorno CI detectado, saltando apertura del dashboard.');
+  // En CI se omite (no abrir navegador sin sentido).
+  // NO_OPEN_DASHBOARD: cuando lo lanza el dashboard, ya está abierto y hace
+  // polling — abrir otra pestaña solo molesta.
+  if (process.env.CI || process.env.NO_OPEN_DASHBOARD) {
+    console.log('[Runner] Apertura automática del dashboard omitida (CI o lanzado desde el dashboard).');
     return;
   }
 

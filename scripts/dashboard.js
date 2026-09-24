@@ -113,7 +113,10 @@ function loadSites() {
       url,
       key: siteKey(url),
       dominio: siteLabel(url),
-      auth,
+      // IMPORTANTE: NO exponer credenciales (username/password) ni endpoints
+      // internos (loginUrl) en la API pública del dashboard. El panel solo necesita
+      // saber si el sitio requiere auth para mostrar el badge.
+      auth: auth ? { enabled: !!auth.enabled } : null,
     }));
 }
 
@@ -262,8 +265,8 @@ function startRun(site) {
       cwd: PROJECT_ROOT,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PORT: String(PORT) },
-    });
+      env: { ...process.env, PORT: String(PORT), NO_OPEN_DASHBOARD: '1' },
+    }); 
   } catch (err) {
     runState.running = false;
     console.error('[Dashboard] No se pudo lanzar el runner:', err.message);

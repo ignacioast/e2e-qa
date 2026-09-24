@@ -354,6 +354,9 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         const shotName = `${slugify(url)}.png`;
         let shotRel = null;
         try {
+          // Esperar a que los elementos dinámicos terminen de renderizarse
+          // antes del pantallazo (el shot inmediato salía "vacío" en SPAs).
+          await page.waitForTimeout(2000);
           await page.screenshot({ path: path.join(SHOTS_DIR, shotName) });
           shotRel = `screenshots/${siteKey}/${shotName}`;
         } catch { /* no crítico */ }

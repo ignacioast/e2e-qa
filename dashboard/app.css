@@ -98,6 +98,7 @@ body {
 }
 .btn-ghost[hidden] { display: none; } /* Oculta el botón si tiene el atributo hidden */
 .btn-ghost:hover { background: var(--panel-2); border-color: var(--border); }
+
 /* ---------- Botón de Eliminar (Rojo) ---------- */
 /* ---------- Botón de Eliminar (Ghost Rojo) ---------- */
 .btn-danger {
