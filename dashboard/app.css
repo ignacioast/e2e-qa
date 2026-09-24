@@ -58,7 +58,23 @@ body {
 .brand h1 { font-size: 18px; font-weight: 600; letter-spacing: .2px; }
 .brand p { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+
+.logo {
+  flex-shrink: 0;
+  display: block;
+}
+
+
+
 .toolbar { display: flex; align-items: center; gap: 12px; }
+.toolbar-brand { display: flex; align-items: center; gap: 8px; }
 .stamp { color: var(--muted); font-size: 12px; font-family: var(--mono); }
 .btn {
   background: var(--accent);
@@ -80,6 +96,7 @@ body {
   display: inline-flex;
   align-items: center;
 }
+.btn-ghost[hidden] { display: none; } /* Oculta el botón si tiene el atributo hidden */
 .btn-ghost:hover { background: var(--panel-2); border-color: var(--border); }
 /* ---------- Botón de Eliminar (Rojo) ---------- */
 /* ---------- Botón de Eliminar (Ghost Rojo) ---------- */
@@ -283,6 +300,7 @@ main { max-width: 1240px; margin: 22px auto; padding: 0 24px; }
 }
 .badge.ok { background: #ecfdf3; color: var(--ok); border-color: #b7f0cd; }
 .badge.bad { background: #fef2f2; color: var(--bad); border-color: #f6c8c8; }
+.badge.warn { background: #fffbeb; color: var(--warn); border-color: #fde68a; }
 
 td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font-size: 12px; }
 .issue { color: var(--warn); font-size: 12px; max-width: 260px; }
@@ -299,6 +317,13 @@ td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font
   transition: opacity .15s;
 }
 .thumb:hover { opacity: .85; }
+
+/* ---------- Reporte HTML (Playwright) ---------- */
+.report-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
 
 /* ---------- Errores de consola ---------- */
 .console-list { display: flex; flex-direction: column; gap: 8px; }

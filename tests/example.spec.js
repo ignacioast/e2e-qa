@@ -139,7 +139,7 @@ async function collectViaMenuClicks(page, baseUrl, baseDomain) {
     const found = new Map();
     const origin = new URL(baseUrl).origin;
     const baseNorm = normalizeUrl(baseUrl);
-    const DEADLINE_MS = 14000;
+    const DEADLINE_MS = 22000;
     const deadline = Date.now() + DEADLINE_MS;
 
     // Localizar candidatos clicables de la zona de menú (mitad izquierda de la pantalla)
@@ -149,20 +149,22 @@ async function collectViaMenuClicks(page, baseUrl, baseDomain) {
       const all = document.querySelectorAll('body *');
       for (const el of all) {
         const tag = el.tagName.toLowerCase();
-        if (['input', 'select', 'textarea', 'script', 'style', 'svg', 'path', 'label', 'img', 'iframe'].includes(tag)) continue;
-        if (getComputedStyle(el).cursor !== 'pointer') continue;
+        if (['input', 'select', 'textarea', 'script', 'style', 'svg', 'path', 'label', 'img', 'iframe', 'button', 'a'].includes(tag)) continue;
+        if (getComputedStyle(el).cursor !== 'pointer' && getComputedStyle(el).cursor !== 'hand') continue;
         const text = (el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 60);
         if (!text || text.length > 60 || text.length < 2) continue;
         if (seen.has(text)) continue;
         const r = el.getBoundingClientRect();
         if (!r.width || !r.height) continue;
-        if (r.left > window.innerWidth * 0.55) continue; // menú lateral suele estar a la izquierda
+        // Ampliar zona de menú: izquierda 65% (antes 55%) para captar menús laterales anchos
+        if (r.left > window.innerWidth * 0.65) continue;
         const href = el.getAttribute('href');
         if (href && href !== '#') continue; // los <a> reales ya los cubre collectNavLinks
         seen.add(text);
         items.push({ text, tag, x: Math.round(r.left), y: Math.round(r.top) });
       }
-      return items.slice(0, 6);
+      // Aumentar límite a 12 candidatos (antes 6)
+      return items.slice(0, 12);
     }).catch(() => []);
 
     if (candidates.length === 0) {
@@ -188,23 +190,20 @@ async function collectViaMenuClicks(page, baseUrl, baseDomain) {
         if (isNewPage) {
           found.set(afterNorm, after);
           console.log(`[Crawler] 💠 Click "${cand.text}" → ${after}`);
-          // Navegación real encontrada: no gastar el resto del deadline en los demás clics.
-          return [...found.entries()].map(([normalized, url]) => ({ url, normalized }));
+          // IMPORTANTE: NO hacer return aquí — seguir probando el resto de candidatos
+          // para descubrir TODAS las subpáginas (fix: 10.20.7.81 solo hallaba 1).
+        } else {
+          console.log(`[Crawler]   click "${cand.text}" sin cambio de ruta`);
         }
-        console.log(`[Crawler]   click "${cand.text}" sin cambio de ruta`);
       } catch { /* elemento no clickeable */ }
     }
 
     return [...found.entries()].map(([normalized, url]) => ({ url, normalized }));
   };
 
-  return Promise.race([
-    crawl(),
-    new Promise((resolve) => setTimeout(() => {
-      console.log('[Crawler] Timeout global de clics alcanzado — se audita solo la página base.');
-      resolve([]);
-    }, HARD_LIMIT_MS)),
-  ]);
+  // El crawl tiene su propio DEADLINE_MS (14 s). No usar Promise.race que
+  // resuelve antes de que crawl() devuelva los hallazgos (fix: 10.20.7.81).
+  return crawl();
 }
 
 test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright Engine', () => {
@@ -301,7 +300,13 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
             console.log(`[Pantallazo] Guardado en reports/screenshots/errors/${slugify(url)}_error.png`);
           } catch { /* página cerrada */ }
 
-          auditResults.push({ url, status: 'FALLÓ', loadMs: 'falló', memoryMB: 'falló', cache: 'falló', issues: [msg], screenshot: null });
+          // Distinguir errores de conexión (infra) de fallos reales:
+          // net::ERR_CONNECTION_REFUSED, ERR_CONNECTION_TIMEOUT, ERR_INTERNET_DISCONNECTED,
+          // ERR_NAME_NOT_RESOLVED, ERR_CONNECTION_RESET, ERR_EMPTY_RESPONSE → 'INACCESIBLE'
+          const isConnectionError = /net::ERR_(CONNECTION_(REFUSED|RESET|TIMEOUT)|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|EMPTY_RESPONSE|ADDRESS_UNREACHABLE)/.test(msg);
+          const status = isConnectionError ? 'INACCESIBLE' : 'FALLÓ';
+
+          auditResults.push({ url, status, loadMs: 'falló', memoryMB: 'falló', cache: 'falló', issues: [msg], screenshot: null });
           return normalized;
         }
         const loadMs = Date.now() - t0;
@@ -431,6 +436,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         totalPaginas: auditResults.length,
         ok: auditResults.filter((r) => r.status === 'OK').length,
         fallidas: auditResults.filter((r) => r.status === 'FALLÓ').length,
+        inaccesibles: auditResults.filter((r) => r.status === 'INACCESIBLE').length,
         paginas: auditResults,
         // Errores de consola únicos por mensaje, con las páginas donde aparecen
         // (deduplicados a nivel sitio: un { mensaje, paginas: [...] } por mensaje).
@@ -443,13 +449,22 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       // --- RESUMEN FINAL ---
       console.log('\n===== RESUMEN DE AUDITORÍA =====');
       const ok = auditResults.filter((r) => r.status === 'OK');
-      const failed = auditResults.filter((r) => r.status !== 'OK');
+      const failed = auditResults.filter((r) => r.status === 'FALLÓ');
+      const unreachable = auditResults.filter((r) => r.status === 'INACCESIBLE');
+      if (unreachable.length) {
+        console.log('\n[Páginas inaccesibles]');
+        for (const r of unreachable) {
+          console.log(`  [${r.status}] ${r.url} — ${r.issues.join(', ')}`);
+        }
+        console.log('');
+      }
       for (const r of auditResults) {
+        if (r.status === 'INACCESIBLE') continue;
         console.log(`  [${r.status}] ${r.url} — ${r.loadMs} ms — ${r.memoryMB} — ${r.cache}`);
       }
-      console.log(`Total: ${auditResults.length} páginas (${ok.length} OK / ${failed.length} fallidas)`);
+      console.log(`Total: ${auditResults.length} páginas (${ok.length} OK / ${failed.length} fallidas${unreachable.length ? ` / ${unreachable.length} inaccesibles` : ''})`);
 
-      // Aserción final: informa de las páginas fallidas (sin matar el reporte)
+      // Aserción final: solo falla si hay páginas FALLÓ, no INACCESIBLE
       expect(failed.length, `Páginas que fallaron: ${failed.map((f) => f.url).join(', ')}`).toBe(0);
     });
   });

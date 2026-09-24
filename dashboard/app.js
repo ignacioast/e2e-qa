@@ -22,6 +22,7 @@ function toggleTheme() {
   applyTheme(state.theme === 'dark' ? 'light' : 'dark');
 }
 
+
 async function fetchJSON(url) {
   try {
     const res = await fetch(url);
@@ -43,6 +44,10 @@ async function load() {
   state.sites = Array.isArray(authSites) ? authSites : [];
   state.audit = auditMap && !auditMap.error ? auditMap : {};
   state.jmeter = jmeterMap && !jmeterMap.error ? jmeterMap : {};
+
+  // ¿Existe el reporte HTML de Playwright? (para mostrar el botón "Reporte HTML")
+  const rep = await fetchJSON('/api/report');
+  state.pwReport = !!(rep && rep.available);
 
   // Si hay una ejecución en curso, activar el polling.
   const status = await fetchJSON('/api/run/status');
@@ -140,6 +145,7 @@ function renderDetail(key) {
   $('#backHome').hidden = false;
   $('#siteSelect').hidden = false;
   fillSiteSelect();
+  $('#pwReportLink').hidden = !state.pwReport;
 
   const audit = state.audit[key] || null;
   const jmeter = state.jmeter[key] || null;
@@ -184,6 +190,9 @@ function renderKPIs(audit, jmeter) {
     cards.push(kpi('Páginas', audit.totalPaginas, 'auditadas'));
     cards.push(kpi('OK', audit.ok, 'sin problemas', 'ok'));
     cards.push(kpi('Fallidas', audit.fallidas, audit.fallidas > 0 ? 'revisar' : 'ninguna', audit.fallidas > 0 ? 'bad' : 'ok'));
+    if (audit.inaccesibles > 0) {
+      cards.push(kpi('Inaccesibles', audit.inaccesibles, 'servidor/no responde', 'warn'));
+    }
   } else {
     cards.push(kpi('Auditoría', '—', 'aún no ejecutada', 'muted'));
   }
@@ -219,7 +228,7 @@ function renderAudit(audit, search, statusFilter) {
     .filter((p) => !search || p.url.toLowerCase().includes(search.toLowerCase()))
     .filter((p) => statusFilter === 'all' || p.status === statusFilter)
     .map((p) => {
-      const cls = p.status === 'OK' ? 'ok' : 'bad';
+      const cls = p.status === 'OK' ? 'ok' : (p.status === 'INACCESIBLE' ? 'warn' : 'bad');
       // Los errores de consola se muestran en su propia sección dedicada (por tipo y
       // deduplicados a nivel sitio), no en Observaciones de cada fila.
       const issues = (p.issues && p.issues.length)

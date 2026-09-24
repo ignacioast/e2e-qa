@@ -22,6 +22,9 @@ const PROJECT_ROOT = path.join(__dirname, '..');
 const REPORTS_DIR = path.join(PROJECT_ROOT, 'reports');
 const WEB_DIR = path.join(PROJECT_ROOT, 'dashboard');
 const URLS_PATH = path.join(PROJECT_ROOT, 'data', 'urls.json');
+// Reporte HTML de Playwright (generado por el reporter 'html' tras test:stress).
+const PW_REPORT_DIR = path.join(PROJECT_ROOT, 'playwright-report');
+const PW_REPORT_ROOT = path.resolve(PW_REPORT_DIR);
 const PORT = process.env.PORT || 3000;
 // HOST '0.0.0.0' expone el dashboard a toda la red local (LAN).
 // Para acceso solo local: HOST=127.0.0.1; detrás de nginx: HOST=127.0.0.1.
@@ -36,6 +39,10 @@ const CONTENT_TYPES = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.zip': 'application/zip',
+  '.md': 'text/markdown; charset=utf-8',
+  '.ttf': 'font/ttf',
+  '.webmanifest': 'application/manifest+json',
 };
 
 function sendFile(res, filePath) {
@@ -321,6 +328,10 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/api/run/status') {
     return sendJson(res, runStatus());
   }
+  if (urlPath === '/api/report') {
+    // Indica si el reporte HTML de Playwright está disponible para enlazar.
+    return sendJson(res, { available: fs.existsSync(path.join(PW_REPORT_ROOT, 'index.html')) });
+  }
   if (urlPath.startsWith('/api/run/start/')) {
     if (req.method !== 'POST') {
       res.writeHead(405, { 'Content-Type': 'text/plain' });
@@ -342,6 +353,20 @@ const server = http.createServer((req, res) => {
   const filePath = path.join(REPORTS_DIR, urlPath.replace(/^\/+/, ''));
   if (filePath.startsWith(REPORTS_DIR) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
     return sendFile(res, filePath);
+  }
+
+  // ---- Reporte HTML de Playwright (/report/...) ----
+  if (urlPath === '/report') {
+    res.writeHead(302, { 'Location': '/report/' });
+    res.end();
+    return;
+  }
+  if (urlPath.startsWith('/report/')) {
+    const rel = urlPath.replace(/^\/report\//, '');
+    const reportFile = path.join(PW_REPORT_ROOT, rel || 'index.html');
+    if (reportFile.startsWith(PW_REPORT_ROOT) && fs.existsSync(reportFile) && fs.statSync(reportFile).isFile()) {
+      return sendFile(res, reportFile);
+    }
   }
 
   res.writeHead(404, { 'Content-Type': 'text/plain' });

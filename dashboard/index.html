@@ -17,11 +17,14 @@
 
 <body>
   <header class="topbar">
+    
     <div class="brand">
+      <img src="/favicon.png" alt="Logo" class="logo" width="40" height="40">
       <div>
         <h1>E2E QA</h1>
         <p>Playwright + JMeter</p>
       </div>
+     
     </div>
     <div class="toolbar">
       <span class="stamp" id="stamp">—</span>
@@ -75,6 +78,12 @@
         Ejecuta <code>npm run test:stress</code> para generar una nueva.
       </div>
 
+      <div class="report-toolbar">
+        <a id="pwReportLink" class="btn btn-ghost" href="/report/" target="_blank" rel="noopener" hidden>
+          Reporte HTML (Playwright)
+        </a>
+      </div>
+
       <section id="kpis" class="kpis"></section>
 
       <section class="panel" id="auditTablePanel">
@@ -86,6 +95,7 @@
               <option value="all">Todos los estados</option>
               <option value="OK">Solo OK</option> 
               <option value="FALLÓ">Solo fallidas</option>
+              <option value="INACCESIBLE">Solo inaccesibles</option>
             </select>
           </div>
         </div>
