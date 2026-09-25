@@ -46,5 +46,14 @@
       "username": "cliente@ast.cl",
       "password": "astidi2025"
     }
+  },
+  {
+    "url": "https://trackiot.wisensor.cl",
+    "auth": {
+      "enabled": true,
+      "loginUrl": "https://trackiot.wisensor.cl/api/authenticated",
+      "username": "admin@iotlink.cl",
+      "password": "astidi2025"
+    }
   }
 ]

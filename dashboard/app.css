@@ -339,6 +339,40 @@ td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font
 .console-meta { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .console-urls { font-family: var(--mono); }
 
+/* ---------- Rendimiento y Assets rotos ---------- */
+.perf-list { display: flex; flex-direction: column; gap: 14px; }
+.perf-group { display: flex; flex-direction: column; gap: 8px; }
+.perf-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--muted);
+}
+.perf-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+}
+.perf-item.warn { background: #fffbeb; border-color: #fde68a; }
+.perf-item.bad { background: #fef2f2; border-color: #f6c8c8; }
+.perf-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.perf-badge {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+.perf-item.warn .perf-badge { color: var(--warn, #b45309); }
+.perf-item.bad .perf-badge { color: var(--bad); }
+.perf-type { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.perf-url { font-family: var(--mono); word-break: break-all; }
+.perf-meta { margin-top: 4px; color: var(--muted); font-size: 11px; }
+
 /* ---------- JMeter ---------- */
 .jmeter-grid {
   display: grid;

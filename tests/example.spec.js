@@ -64,20 +64,26 @@ const slugify = (url) => {
 // Hace scroll real por toda la página (para cargar contenido lazy, formularios,
 // imágenes y demás que solo aparecen al hacer scroll), como haría un usuario.
 async function scrollThroughPage(page, hoverMenu) {
+  // Total de scroll acotado a 120 pasos como máximo: si una página crece sin fin
+  // (feed infinito, snowstorm), el loop no debe colgar el test para siempre.
   const dims = await page.evaluate(() => ({ height: document.body.scrollHeight, vh: window.innerHeight }));
   const total = Math.max(dims.height - dims.vh, 0);
   const step = Math.max(400, Math.floor(total / 12));
-  for (let y = 0; y < total; y += step) {
-    await page.evaluate((_y) => window.scrollTo(0, _y), y);
+  const maxSteps = Math.ceil(total / step);
+  const steps = Math.min(Math.max(maxSteps, 1), 120);
+  for (let i = 0; i < steps; i++) {
+    await page.evaluate((_y) => window.scrollTo(0, _y), Math.min(i * step, total));
     await page.waitForTimeout(260); // deja tiempo para que carguen las imágenes lazy
   }
   await page.evaluate((_total) => window.scrollTo(0, _total), total);
   await page.waitForTimeout(400);
-  // Hover sobre los enlaces del menú para revelar submenús desplegables (solo página base)
+  // Hover sobre los enlaces del menú para revelar submenús desplegables (solo página base).
+  // NOTA: timeout corto obligatorio — sin él, un elemento enorme/animado (p. ej. un
+  // div contenedor del header) hace esperar a Playwright indefinidamente y cuelga el test.
   if (hoverMenu) {
-    const navLinks = await page.locator('nav a, header a, .menu a, aside a, aside [role="menuitem"], .sidebar a').all().catch(() => []);
+    const navLinks = await page.locator('nav a, header a, header button, .menu a, aside a, aside [role="menuitem"], .sidebar a').all().catch(() => []);
     for (const link of navLinks.slice(0, 10)) {
-      try { await link.hover().catch(() => {}); await page.waitForTimeout(150); } catch { /* ignorar */ }
+      try { await link.hover({ timeout: 1500 }).catch(() => {}); await page.waitForTimeout(150); } catch { /* ignorar */ }
     }
   }
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -123,6 +129,52 @@ async function collectNavLinks(page, baseDomain) {
     }
   }
   return links;
+}
+
+// Detecta si la página actual está operando con sesión viva (menú/nav visible).
+// Si es true, UNA RECARGA (page.goto/page.reload) desloguearía SPAs cuya sesión
+// vive solo en memoria del router → por eso evitamos goto a la misma URL.
+async function hasNavLinks(page) {
+  try {
+    const count = await page.locator('nav a, header a, aside a, .sidebar a, .menu a, [role="menuitem"]').count();
+    return count > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Navega a un enlace interno haciendo CLICK en el <a href> real (navegación
+// client-side en SPAs, sin recargar = no se pierde la sesión). Devuelve true si
+// la URL quedó en el destino; false si no había anchor que coincida o no navegó
+// (cae en el fallback de page.goto en el flujo principal).
+async function clickAndWaitUrl(page, targetUrl) {
+  let tNorm;
+  try { tNorm = normalizeUrl(targetUrl); } catch { return false; }
+  let tPath;
+  try { tPath = new URL(targetUrl).pathname + new URL(targetUrl).search; } catch { return false; }
+
+  const clicked = await page.evaluate((path) => {
+    const anchors = [...document.querySelectorAll('a[href]')];
+    const anchor = anchors.find((a) => {
+      const href = a.getAttribute('href') || '';
+      const target = href.split('#')[0];
+      if (target === path) return true;
+      try { return new URL(target, location.origin).pathname + new URL(target, location.origin).search === path; } catch { return false; }
+    });
+    if (!anchor) return false;
+    try { anchor.scrollIntoView({ block: 'center' }); } catch {}
+    anchor.click();
+    return true;
+  }, tPath).catch(() => false);
+
+  if (!clicked) return false;
+  for (let i = 0; i < 15; i++) {
+    await page.waitForTimeout(250);
+    try {
+      if (normalizeUrl(page.url()) === tNorm) return true;
+    } catch { return false; }
+  }
+  return false;
 }
 
 // Descubrimiento por clic para SPAs con routing por JS (React/Vue/Angular) donde el
@@ -206,6 +258,38 @@ async function collectViaMenuClicks(page, baseUrl, baseDomain) {
   return crawl();
 }
 
+// Detecta páginas que sirven HTTP 200 pero cuyo contenido renderizado es de
+// "página no encontrada" (soft 404): comunes en SPAs que cargan el layout con
+// cualquier URL aunque la ruta no exista. Funciona con títulos/plantillas ES y EN.
+function detectSoft404({ title, h1, bodyText }) {
+  const haystack = [title, h1, bodyText].filter(Boolean).join(' ').toLowerCase();
+  if (!haystack) return false;
+
+  // Frases completas de plantilla "no encontrada".
+  const frases = [
+    'página no encontrada',
+    'pagina no encontrada',
+    'recurso no encontrado',
+    'no se encontró la página',
+    'no se encontro la pagina',
+    'content not found',
+    'page not found',
+    'resource not found',
+  ];
+  if (frases.some((f) => haystack.includes(f))) return true;
+
+  // <title> o <h1> que son la plantilla 404 por sí mismos (indicador fuerte).
+  if (/(^|\s)(404|error 404|not found)(\s|$)/.test(title.toLowerCase()) ||
+      /(^|\s)(404|error 404|not found)(\s|$)/.test((h1 || '').toLowerCase())) {
+    return true;
+  }
+
+  // En conjunción: el body menciona "no encontrad"/"not found" de forma aislada
+  // sumado a que la página no tiene h1 real (señal débil combinada).
+  if (/(no encontrad|not found)/.test(haystack) && !h1) return true;
+  return false;
+}
+
 test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright Engine', () => {
   test.setTimeout(600000);
 
@@ -218,18 +302,26 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
 
       const needsAuth = authEnabled(entry);
 
+      // Si tras el login el menú queda visible, la sesión vive en memoria del
+      // router SPA y una recarga la desloguearía: auditamos SIN page.goto.
+      let liveSession = false;
+
       // Autenticación estilo Postman: login por API directa ANTES de navegar.
       // Guardamos cookies/tokens en el contexto del navegador para que el
       // page.goto() inicial ya viaje con sesión iniciada. Soporta NextAuth
       // (CSRF + form-encoded) y loguea status/body si falla.
       if (needsAuth) {
         const loginResult = await apiLogin(page, context, entry);
-        // SPAs con auth por TOKEN (localStorage) deciden mostrar el sidebar según
-        // el localStorage: recargar la app solo si apiLogin confirmó que guardó un
-        // token. Para auth por cookies (NextAuth, hub.wisensor) NO recargamos:
-        // la sesión ya viaja en el contexto y un reload extra solo agrega riesgo
-        // de Cloudflare/latencia.
-        if (loginResult && loginResult.tokenSaved) {
+        // Si tras el login el menú ya es visible, la sesión vive en la página (SPA
+        // con sesión en memoria o cookie): una recarga (page.goto/page.reload) la
+        // desloguearía → auditamos todo SIN recargar, navegando por clicks en los
+        // <a> reales (routing client-side).
+        liveSession = await hasNavLinks(page);
+        if (liveSession) {
+          console.log('[Auth] Sesión viva detectada tras login (menú visible) — se audita SIN recargar.');
+        } else if (loginResult && loginResult.tokenSaved) {
+          // SPAs con auth por TOKEN (localStorage): el menú aparece tras recargar
+          // (la app decide el estado logueado leyendo el localStorage).
           await page.goto(urlBase, { waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {});
           await page.waitForTimeout(2500);
           console.log(`[Auth] App base recargada tras login (token guardado): ${page.url()}`);
@@ -265,51 +357,97 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         }
       });
 
-      // Audita UNA página de forma profunda
-      async function auditPage(url, label, hoverMenu) {
+      // Audita UNA página de forma profunda. Si `live` es true, NO se hace
+      // page.goto: se asume que la página ya está cargada en esa URL y hay que
+      // auditarla sin recargar (SPAs cuya sesión se pierde al re-navegar).
+      async function auditPage(url, label, hoverMenu, live = false) {
         const normalized = normalizeUrl(url) || url;
         const issues = [];
         const consoleErrors = [];
+        const brokenAssets = [];
+        const slowApis = [];
+        const assertionFails = [];
         let failedRequests = [];
+        const apiTimings = new Map(); // url -> fecha de inicio (para medir duración)
 
-        page.on('pageerror', (err) => consoleErrors.push(`[JS] ${err.message}`));
+        // Aserciones tipo "expect(...).toBe(404)" que el propio sitio lanza cuando
+        // una imagen/recurso no responde como debería: se reportan como observación.
+        const isAssertionError = (text) => /expect\s*\(/i.test(text) && /\.toBe\s*\(/i.test(text);
+
+        page.on('pageerror', (err) => {
+          const text = err.message || '';
+          consoleErrors.push(`[JS] ${text}`);
+          if (isAssertionError(text)) assertionFails.push(text.trim());
+        });
         page.on('console', (msg) => {
           if (msg.type() === 'error') {
-            consoleErrors.push(`[Console] ${msg.text().trim()}`);
+            const text = msg.text().trim();
+            consoleErrors.push(`[Console] ${text}`);
+            if (isAssertionError(text)) assertionFails.push(text);
           }
         });
 
+        // Marca el inicio de cada petición para medir cuánto tarda en responder.
+        page.on('request', (req) => {
+          const rt = req.resourceType();
+          if (rt === 'xhr' || rt === 'fetch') apiTimings.set(req.url(), Date.now());
+        });
+
         page.on('response', (resp) => {
-          if (resp.status() >= 400) {
-            failedRequests.push(`${resp.status()} ${resp.url().slice(0, 120)}`);
+          const status = resp.status();
+          const reqUrl = resp.url();
+          const rt = resp.request().resourceType();
+
+          // Imágenes / CSS / JS / fuentes rotos: 404 o 500.
+          if ((status === 404 || status === 500) && ['image', 'stylesheet', 'script', 'font', 'manifest'].includes(rt)) {
+            brokenAssets.push(`${status} ${rt} ${reqUrl.slice(0, 140)}`);
+          }
+
+          // Endpoints de API que tardan más de 2 s: cuello de botella de backend.
+          if (rt === 'xhr' || rt === 'fetch') {
+            const start = apiTimings.get(reqUrl);
+            if (start) {
+              const ms = Date.now() - start;
+              if (ms > 2000) slowApis.push(`${reqUrl.slice(0, 140)} → ${ms} ms`);
+            }
+            apiTimings.delete(reqUrl);
+          }
+
+          if (status >= 400) {
+            failedRequests.push(`${status} ${reqUrl.slice(0, 120)}`);
           }
         });
 
         console.log(`[Auditoría] ${label} — Analizando: ${url}`);
 
         const t0 = Date.now();
-        try {
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
-        } catch (err) {
-          const msg = (err.message || '').split('\n')[0];
-          console.log(`[Auditoría] ERROR CARGANDO ${url}: ${msg}`);
-
-          // Pantallazo del error (si la página sigue viva)
+        let loadMs = 0;
+        if (!live) {
           try {
-            await page.screenshot({ path: path.join(ERRORS_SHOTS_DIR, `${slugify(url)}_error.png`) });
-            console.log(`[Pantallazo] Guardado en reports/screenshots/errors/${slugify(url)}_error.png`);
-          } catch { /* página cerrada */ }
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
+          } catch (err) {
+            const msg = (err.message || '').split('\n')[0];
+            console.log(`[Auditoría] ERROR CARGANDO ${url}: ${msg}`);
 
-          // Distinguir errores de conexión (infra) de fallos reales:
-          // net::ERR_CONNECTION_REFUSED, ERR_CONNECTION_TIMEOUT, ERR_INTERNET_DISCONNECTED,
-          // ERR_NAME_NOT_RESOLVED, ERR_CONNECTION_RESET, ERR_EMPTY_RESPONSE → 'INACCESIBLE'
-          const isConnectionError = /net::ERR_(CONNECTION_(REFUSED|RESET|TIMEOUT)|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|EMPTY_RESPONSE|ADDRESS_UNREACHABLE)/.test(msg);
-          const status = isConnectionError ? 'INACCESIBLE' : 'FALLÓ';
+            // Pantallazo del error (si la página sigue viva)
+            try {
+              await page.screenshot({ path: path.join(ERRORS_SHOTS_DIR, `${slugify(url)}_error.png`) });
+              console.log(`[Pantallazo] Guardado en reports/screenshots/errors/${slugify(url)}_error.png`);
+            } catch { /* página cerrada */ }
 
-          auditResults.push({ url, status, loadMs: 'falló', memoryMB: 'falló', cache: 'falló', issues: [msg], screenshot: null });
-          return normalized;
+            // Distinguir errores de conexión (infra) de fallos reales:
+            // net::ERR_CONNECTION_REFUSED, ERR_CONNECTION_TIMEOUT, ERR_INTERNET_DISCONNECTED,
+            // ERR_NAME_NOT_RESOLVED, ERR_CONNECTION_RESET, ERR_EMPTY_RESPONSE → 'INACCESIBLE'
+            const isConnectionError = /net::ERR_(CONNECTION_(REFUSED|RESET|TIMEOUT)|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|EMPTY_RESPONSE|ADDRESS_UNREACHABLE)/.test(msg);
+            const status = isConnectionError ? 'INACCESIBLE' : 'FALLÓ';
+
+            auditResults.push({ url, status, loadMs: 'falló', memoryMB: 'falló', cache: 'falló', issues: [msg], screenshot: null });
+            return normalized;
+          }
+          loadMs = Date.now() - t0;
+        } else {
+          console.log('  [Live] Página ya cargada (sesión viva): se audita sin recargar.');
         }
-        const loadMs = Date.now() - t0;
 
         // --- MEMORIA ---
         const memoryMetrics = await page.evaluate(() => {
@@ -344,11 +482,21 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
             forms: document.querySelectorAll('form').length,
             inputs: [...document.querySelectorAll('input, select, textarea')].length,
             buttons: document.querySelectorAll('button, [type="submit"], [type="button"]').length,
+            bodyText: (document.body?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 300),
           };
         });
         if (!htmlChecks.title) issues.push('Página sin <title>');
         if (!htmlChecks.h1) issues.push('Página sin <h1>');
         if (htmlChecks.imgSinAlt > 0) issues.push(`${htmlChecks.imgSinAlt} imágenes sin alt`);
+
+        // --- SOFT 404: HTTP 200 pero el contenido renderizado es de "no encontrada".
+        // Ocurre en SPAs que sirven el layout con la URL pero no existe la página
+        // (p. ej. ast /network-ip). Detección universal por frases/plantillas.
+        const soft404 = detectSoft404(htmlChecks);
+        if (soft404) {
+          issues.push('Soft 404: HTTP 200 pero el contenido muestra "página no encontrada"');
+          console.log('  [Soft404] Página carga con HTTP 200 pero su contenido es de "no encontrada"');
+        }
 
         // --- PANTALLAZO POR PÁGINA ---
         const shotName = `${slugify(url)}.png`;
@@ -365,6 +513,11 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         const consoleErrorsUnique = [...new Set(consoleErrors)];
         registerConsoleErrors(url, consoleErrorsUnique);
         if (failedRequests.length) pageIssues.push(`${failedRequests.length} respuestas 4xx/5xx`);
+        if (brokenAssets.length) pageIssues.push(`${brokenAssets.length} asset(s) roto(s) [404/500]`);
+        if (slowApis.length) pageIssues.push(`${slowApis.length} API(s) lenta(s) >2s`);
+        // Fallos de aserción (imagen/recurso que no responde como el sitio espera):
+        // se registran como observación en la propia página.
+        assertionFails.forEach((af) => pageIssues.push(`Fallido (aserción): ${af.slice(0, 160)}`));
 
         // LOG LEGIBLE
         console.log(`  [Tiempo]  ${loadMs} ms`);
@@ -372,22 +525,32 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         console.log(`  [Cache]   ${cache}`);
         console.log(`  [Title]   ${htmlChecks.title || '(sin title)'}`);
         console.log(`  [Forms]   ${htmlChecks.forms} formulario(s) · ${htmlChecks.inputs} campo(s) · ${htmlChecks.buttons} botón(es)`);
+        if (failedRequests.length) console.log(`  [Assets]  ${failedRequests.length} respuesta(s) 4xx/5xx`);
+        if (brokenAssets.length) console.log(`  [Assets]  Rotos: ${brokenAssets.join(' | ')}`);
+        if (slowApis.length) console.log(`  [API]     LENTAS (>2s): ${slowApis.join(' | ')}`);
         if (pageIssues.length) console.log(`  [Issue]   ${pageIssues.join(' | ')}`);
 
+        // Fallo de aserción (p. ej. expect(...).toBe(404)) o soft 404 = la página quedó
+        // con un recurso/contenido fallido: se marca como FALLÓ (no solo observación).
+        const pageStatus = (assertionFails.length || soft404) ? 'FALLÓ' : 'OK';
+
         auditResults.push({
-          url, status: 'OK', loadMs, memoryMB, cache,
+          url, status: pageStatus, loadMs, memoryMB, cache,
           title: htmlChecks.title,
           forms: htmlChecks.forms,
           inputs: htmlChecks.inputs,
           buttons: htmlChecks.buttons,
           issues: pageIssues,
+          brokenAssets,
+          slowApis,
+          soft404: !!soft404,
           screenshot: shotRel,
         });
         return normalized;
       }
 
       // --- PASO 1: Página base ---
-      await auditPage(urlBase, 'Página base', true);
+      await auditPage(urlBase, 'Página base', true, liveSession);
 
       // --- PASO 2: TODOS los enlaces internos (sin límite, sin círculos) ---
       // El sitio responde a veces una versión reducida (anti-bot) sin enlaces:
@@ -398,7 +561,10 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         if (!navLinks.length && attempt < 2) {
           console.log(`[Crawler] 0 enlaces detectados (posible respuesta reducida). Reintentando en 2 s... (${attempt}/2)`);
           await page.waitForTimeout(2000);
-          await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          // Con sesión viva NO recargar (desloguearía la SPA): solo re-colectar.
+          if (!liveSession) {
+            await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          }
           await page.waitForTimeout(1000);
         }
       }
@@ -422,13 +588,32 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         console.log(`[Auditoría] ${navLinks.length} enlaces internos detectados (${clickLinks.length} por clic). Auditando todos...`);
       }
 
-      // Devolver el page a la página base antes de auditar las subpáginas.
-      await page.goto(urlBase, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
-
-      for (const link of navLinks) {
-        if (visitedPages.has(link.normalized)) continue;
-        visitedPages.add(link.normalized);
-        await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`, false);
+      if (liveSession) {
+        // Sesión viva (SPA): navegar por CLICK en el <a> real conserva la sesión
+        // (routing client-side, sin recarga). El menú/header está presente en todas
+        // las páginas del layout, así que se puede encadenar click a click.
+        console.log('[Crawler] Modo sesión viva: navegación por clicks internos (sin recargas).');
+        for (const link of navLinks) {
+          if (visitedPages.has(link.normalized)) continue;
+          visitedPages.add(link.normalized);
+          const navigated = await clickAndWaitUrl(page, link.url);
+          if (navigated) {
+            await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`, false, true);
+          } else {
+            console.log(`[Crawler] Click no navegó a ${link.url} — fallback a page.goto.`);
+            await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`, false);
+          }
+        }
+        // Volver a la base por click (el <a> raíz, si existe) o dejar el estado.
+        await clickAndWaitUrl(page, urlBase).catch(() => {});
+      } else {
+        // Modo tradicional: volver a la página base y abrir cada enlace con goto.
+        await page.goto(urlBase, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        for (const link of navLinks) {
+          if (visitedPages.has(link.normalized)) continue;
+          visitedPages.add(link.normalized);
+          await auditPage(link.url, `Página ${visitedPages.size - 1}/${navLinks.length}`, false);
+        }
       }
 
       // --- GUARDAR REPORTE JSON (por sitio) ---

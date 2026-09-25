@@ -165,6 +165,7 @@ function renderDetail(key) {
   const filter = $('#filterStatus');
   renderAudit(audit, search.value.trim(), filter.value);
   renderConsoleErrors(audit);
+  renderPerf(audit);
   renderJmeter(jmeter);
 }
 
@@ -320,6 +321,91 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+/* ---------- Rendimiento y Assets rotos (por página) ---------- */
+// Extrae de cada página los endpoints lentos (>2 s) y los assets rotos (404/500),
+// agrupados: { apisLentas: [{ url, ms, paginas }...], assetsRotos: [{ code, tipo, url, paginas }...] }
+function collectPerfIssues(audit) {
+  const apis = new Map();   // url completa -> { ms jugado, paginas:Set }
+  const assets = new Map(); // "code|tipo|url" -> { code, tipo, url, paginas:Set }
+
+  if (audit && Array.isArray(audit.paginas)) {
+    for (const p of audit.paginas) {
+      if (Array.isArray(p.slowApis)) {
+        for (const raw of p.slowApis) {
+          // Formato de la spec: "http://.../api/foo → 2639 ms"
+          const m = raw.match(/^(.*) → (\d+) ms$/);
+          const url = m ? m[1] : raw;
+          const ms = m ? parseInt(m[2], 10) : 0;
+          if (!apis.has(url)) apis.set(url, { url, ms, paginas: new Set() });
+          apis.get(url).paginas.add(p.url);
+        }
+      }
+      if (Array.isArray(p.brokenAssets)) {
+        for (const raw of p.brokenAssets) {
+          // Formato de la spec: "404 image http://.../x.png"
+          const parts = raw.split(' ');
+          const code = parts[0] || '';
+          const tipo = parts[1] || '';
+          const url = parts.slice(2).join(' ');
+          const key = code + '|' + tipo + '|' + url;
+          if (!assets.has(key)) assets.set(key, { code, tipo, url, paginas: new Set() });
+          assets.get(key).paginas.add(p.url);
+        }
+      }
+    }
+  }
+
+  return {
+    apis: [...apis.values()].map((a) => ({ ...a, paginas: [...a.paginas] }))
+      .sort((a, b) => b.ms - a.ms),
+    assets: [...assets.values()].map((a) => ({ ...a, paginas: [...a.paginas] }))
+      .sort((a, b) => (a.code === b.code ? a.url.localeCompare(b.url) : a.code.localeCompare(b.code))),
+  };
+}
+
+function renderPerf(audit) {
+  const section = $('#perfPanel');
+  if (!section) return;
+  const { apis, assets } = collectPerfIssues(audit);
+  if (!apis.length && !assets.length) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  $('#perfCount').textContent = String(apis.length + assets.length);
+
+  const block = (title, items, renderItem) =>
+    items.length
+      ? '<div class="perf-group"><div class="perf-title">' + title + '</div>' +
+        items.map(renderItem).join('') + '</div>'
+      : '';
+
+  const apisHtml = block('APIs lentas (&gt;2 s)', apis, (a) =>
+    '<div class="perf-item warn">' +
+      '<div class="perf-line"><span class="perf-badge">' + (a.ms / 1000).toFixed(1) + ' s</span>' +
+      '<span class="perf-url">' + esc(a.url) + '</span></div>' +
+      '<div class="perf-meta">en ' + a.paginas.length +
+        (a.paginas.length === 1 ? ' página' : ' páginas') +
+        '<span class="console-urls"> · ' + a.paginas.slice(0, 3).map(esc).join(' · ') +
+        (a.paginas.length > 3 ? ' …' : '') + '</span></div>' +
+    '</div>'
+  );
+
+  const assetsHtml = block('Assets rotos', assets, (a) =>
+    '<div class="perf-item bad">' +
+      '<div class="perf-line"><span class="perf-badge">' + esc(a.code) + '</span>' +
+      '<span class="perf-type">' + esc(a.tipo) + '</span>' +
+      '<span class="perf-url">' + esc(a.url) + '</span></div>' +
+      '<div class="perf-meta">en ' + a.paginas.length +
+        (a.paginas.length === 1 ? ' página' : ' páginas') +
+        '<span class="console-urls"> · ' + a.paginas.slice(0, 3).map(esc).join(' · ') +
+        (a.paginas.length > 3 ? ' …' : '') + '</span></div>' +
+    '</div>'
+  );
+
+  $('#perfList').innerHTML = apisHtml + assetsHtml;
 }
 
 /* ---------- JMeter ---------- */
