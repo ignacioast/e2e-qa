@@ -270,15 +270,20 @@ function formsCell(p) {
 const normalizeConsoleMsg = (msg) => msg.replace(/\s+/g, ' ').trim();
 
 function collectConsoleErrors(audit) {
-  const grouped = new Map(); // mensaje -> Set(urls)
+  const grouped = new Map(); // mensaje -> { paginas:Set, recursos:Set }
 
   if (audit && Array.isArray(audit.erroresConsola) && audit.erroresConsola.length) {
     for (const entry of audit.erroresConsola) {
       const key = normalizeConsoleMsg(entry.mensaje);
-      if (!grouped.has(key)) grouped.set(key, new Set());
-      (entry.paginas || []).forEach((u) => grouped.get(key).add(u));
+      if (!grouped.has(key)) grouped.set(key, { paginas: new Set(), recursos: new Set() });
+      (entry.paginas || []).forEach((u) => grouped.get(key).paginas.add(u));
+      (entry.recursos || []).forEach((r) => grouped.get(key).recursos.add(r));
     }
-    return [...grouped.entries()].map(([msg, urls]) => ({ mensaje: msg, paginas: [...urls] }));
+    return [...grouped.entries()].map(([msg, g]) => ({
+      mensaje: msg,
+      paginas: [...g.paginas],
+      recursos: [...g.recursos],
+    }));
   }
 
   if (audit && Array.isArray(audit.paginas)) {
@@ -287,12 +292,16 @@ function collectConsoleErrors(audit) {
       for (const i of p.issues) {
         if (!/^\[(Console|JS)\]/.test(i)) continue;
         const key = normalizeConsoleMsg(i);
-        if (!grouped.has(key)) grouped.set(key, new Set());
-        grouped.get(key).add(p.url);
+        if (!grouped.has(key)) grouped.set(key, { paginas: new Set(), recursos: new Set() });
+        grouped.get(key).paginas.add(p.url);
       }
     }
   }
-  return [...grouped.entries()].map(([msg, urls]) => ({ mensaje: msg, paginas: [...urls] }));
+  return [...grouped.entries()].map(([msg, g]) => ({
+    mensaje: msg,
+    paginas: [...g.paginas],
+    recursos: [...g.recursos],
+  }));
 }
 
 function renderConsoleErrors(audit) {
@@ -306,15 +315,34 @@ function renderConsoleErrors(audit) {
   section.hidden = false;
   $('#consoleCount').textContent = String(errs.length);
 
-  $('#consoleList').innerHTML = errs.map((e) =>
-    '<div class="console-err">' +
-      '<div class="console-msg">' + esc(e.mensaje) + '</div>' +
+  $('#consoleList').innerHTML = errs.map((e) => {
+    const resHtml = (e.recursos && e.recursos.length)
+      ? '<div class="console-res"><span class="console-res-label">recursos:</span> ' +
+        e.recursos.map(esc).join('<br>') + '</div>'
+      : '';
+    return '<div class="console-err">' +
+      '<div class="console-msg">' + esc(e.mensaje) + '</div>' + resHtml +
       '<div class="console-meta">en ' + e.paginas.length +
         (e.paginas.length === 1 ? ' página' : ' páginas') +
         '<span class="console-urls"> · ' + e.paginas.map(esc).join(' · ') + '</span>' +
       '</div>' +
-    '</div>'
-  ).join('');
+    '</div>';
+  }).join('');
+
+  // Capturas de las páginas que tenían errores de red/consola (4xx/5xx),
+  // para mostrar visualmente el problema sin abrir DevTools.
+  const shots = (audit && Array.isArray(audit.paginas) ? audit.paginas : [])
+    .filter((p) => p.screenshotErrores)
+    .map((p) => p.screenshotErrores);
+  if (shots.length) {
+    const container = $('#consoleShots');
+    if (container) {
+      container.innerHTML = shots.map((s) =>
+        '<img class="thumb console-shot" src="/' + encodeURIComponent(s) + '" loading="lazy" onclick="openLightbox(\'/' + encodeURIComponent(s) + '\')" alt="Captura con errores">'
+      ).join('');
+      container.hidden = false;
+    }
+  }
 }
 
 function esc(s) {

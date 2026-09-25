@@ -55,5 +55,14 @@
       "username": "admin@iotlink.cl",
       "password": "astidi2025"
     }
+  },
+  {
+    "url": "https://sistema.wisensor.cl",
+    "auth": {
+      "enabled": true,
+      "loginUrl": "https://sistema.wisensor.cl/api/auth/login",
+      "username": "jsanhueza@ast.cl",
+      "password": "jsanhueza"
+    }
   }
 ]

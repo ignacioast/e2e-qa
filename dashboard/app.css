@@ -338,6 +338,20 @@ td.url { max-width: 340px; word-break: break-all; font-family: var(--mono); font
 .console-msg { font-family: var(--mono); color: var(--bad); word-break: break-all; white-space: pre-wrap; }
 .console-meta { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .console-urls { font-family: var(--mono); }
+.console-res {
+  margin-top: 6px; padding: 6px 8px;
+  background: #fff;
+  border: 1px dashed #e0b3b3;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #7a3b3b;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.console-res-label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .5px; }
+.console-shots { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.console-shot { cursor: zoom-in; }
 
 /* ---------- Rendimiento y Assets rotos ---------- */
 .perf-list { display: flex; flex-direction: column; gap: 14px; }

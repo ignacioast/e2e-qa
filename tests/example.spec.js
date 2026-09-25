@@ -53,6 +53,14 @@ const normalizeUrl = (u) => {
   }
 };
 
+// Extrae la URL del recurso/endpoint desde el texto de un error de consola.
+// Ej: "Error HTTP: {status: 404, url: /dispositivos_historial/FJKB624330851, ...}"
+//     -> "/dispositivos_historial/FJKB624330851"
+const extractResourceFromMsg = (text) => {
+  const m = text.match(/(?:url\s*[:=]\s*)["']?([a-zA-Z0-9_\-./?=&%:]+)/i);
+  return m ? m[1] : null;
+};
+
 // Nombre de archivo seguro a partir de una URL (para screenshots)
 const slugify = (url) => {
   return url
@@ -335,11 +343,14 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
       // Errores de consola a nivel SITIO, deduplicados por mensaje (no se repiten
       // por página): mensaje -> Set(URLs donde apareció).
       const siteConsoleErrors = new Map();
-      const registerConsoleErrors = (url, consoleErrors) => {
+      const registerConsoleErrors = (url, consoleErrors, recursos = null) => {
         for (const msg of consoleErrors) {
           if (!msg || !msg.trim()) continue;
-          if (!siteConsoleErrors.has(msg)) siteConsoleErrors.set(msg, new Set());
-          siteConsoleErrors.get(msg).add(url);
+          const key = msg.trim();
+          if (!siteConsoleErrors.has(key)) siteConsoleErrors.set(key, new Set());
+          const entry = siteConsoleErrors.get(key);
+          entry.add(url);
+          if (recursos && recursos.length) entry.resources = new Set([...(entry.resources || []), ...recursos]);
         }
       };
 
@@ -367,6 +378,7 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         const brokenAssets = [];
         const slowApis = [];
         const assertionFails = [];
+        const consoleErrDetails = []; // { msg, resources:Set } por error de consola
         let failedRequests = [];
         const apiTimings = new Map(); // url -> fecha de inicio (para medir duración)
 
@@ -380,11 +392,16 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
           if (isAssertionError(text)) assertionFails.push(text.trim());
         });
         page.on('console', (msg) => {
-          if (msg.type() === 'error') {
-            const text = msg.text().trim();
-            consoleErrors.push(`[Console] ${text}`);
-            if (isAssertionError(text)) assertionFails.push(text);
-          }
+          if (msg.type() !== 'error') return;
+          const text = msg.text().trim();
+          consoleErrors.push(`[Console] ${text}`);
+          const detail = { msg: text, resources: new Set() };
+          // Correlacionar el error con su URL cuando el propio mensaje la trae
+          // (p. ej. "Error HTTP: {status: 404, url: /dispositivos_historial/...}").
+          const recurso = extractResourceFromMsg(text);
+          if (recurso) detail.resources.add(recurso);
+          consoleErrDetails.push(detail);
+          if (isAssertionError(text)) assertionFails.push(text);
         });
 
         // Marca el inicio de cada petición para medir cuánto tarda en responder.
@@ -509,9 +526,39 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
           shotRel = `screenshots/${siteKey}/${shotName}`;
         } catch { /* no crítico */ }
 
+        // Pantallazo extra del estado con errores (4xx/5xx o console errors de red)
+        // para que el reporte muestre visualmente el problema sin abrir DevTools.
+        let shotErrRel = null;
+        if (consoleErrDetails.length || failedRequests.length || brokenAssets.length) {
+          try {
+            const errShotName = `${slugify(url)}_errores.png`;
+            await page.waitForTimeout(500);
+            await page.screenshot({ path: path.join(SHOTS_DIR, errShotName) });
+            shotErrRel = `screenshots/${siteKey}/${errShotName}`;
+            console.log(`  [ShotError] ${shotErrRel}`);
+          } catch { /* no crítico */ }
+        }
+
         const pageIssues = [...issues];
         const consoleErrorsUnique = [...new Set(consoleErrors)];
-        registerConsoleErrors(url, consoleErrorsUnique);
+        // Correlación final: los errores genéricos de red ("Failed to load resource:
+        // ... 404 ()") no traen la URL en el texto; se les asocia la lista real de
+        // peticiones 4xx/5xx de la misma página (failedRequests) para que el reporte
+        // sea trazable sin recurrir a DevTools.
+        const loadRes404 = consoleErrDetails.filter(
+          (d) => /failed to load resource/i.test(d.msg) && d.resources.size === 0,
+        );
+        if (loadRes404.length && failedRequests.length) {
+          const urlsReales = [...new Set(failedRequests)];
+          loadRes404.forEach((d) => urlsReales.forEach((u) => d.resources.add(u)));
+        }
+        // Mapa mensaje -> Set(recursos) consolidado para el registro a nivel sitio.
+        const errToResources = new Map();
+        for (const d of consoleErrDetails) {
+          if (!errToResources.has(d.msg)) errToResources.set(d.msg, new Set());
+          d.resources.forEach((r) => errToResources.get(d.msg).add(r));
+        }
+        registerConsoleErrors(url, consoleErrorsUnique, errToResources);
         if (failedRequests.length) pageIssues.push(`${failedRequests.length} respuestas 4xx/5xx`);
         if (brokenAssets.length) pageIssues.push(`${brokenAssets.length} asset(s) roto(s) [404/500]`);
         if (slowApis.length) pageIssues.push(`${slowApis.length} API(s) lenta(s) >2s`);
@@ -543,6 +590,11 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
           issues: pageIssues,
           brokenAssets,
           slowApis,
+          erroresConsola: consoleErrDetails.map((d) => ({
+            mensaje: d.msg,
+            recursos: [...d.resources],
+          })),
+          screenshotErrores: shotErrRel,
           soft404: !!soft404,
           screenshot: shotRel,
         });
@@ -626,11 +678,12 @@ test.describe('Sistema de Auditoría E2E y Rendimiento Autónomo - Playwright En
         fallidas: auditResults.filter((r) => r.status === 'FALLÓ').length,
         inaccesibles: auditResults.filter((r) => r.status === 'INACCESIBLE').length,
         paginas: auditResults,
-        // Errores de consola únicos por mensaje, con las páginas donde aparecen
-        // (deduplicados a nivel sitio: un { mensaje, paginas: [...] } por mensaje).
+        // Errores de consola únicos por mensaje, con las páginas donde aparecen y los
+        // recursos correlacionados (deduplicados a nivel sitio).
         erroresConsola: [...siteConsoleErrors.entries()].map(([mensaje, paginas]) => ({
           mensaje,
           paginas: [...paginas],
+          recursos: [...(paginas.resources || [])],
         })),
       }, null, 2));
 
